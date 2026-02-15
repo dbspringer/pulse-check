@@ -253,11 +253,7 @@ local function CreateSoundPicker(parent, x, y, getValue, setValue)
     btn:SetScript("OnClick", function(self)
         soundPickerOpen = true
         if soundPickerTimer then soundPickerTimer:Cancel() end
-        soundPickerTimer = C_Timer.NewTicker(5, function()
-            soundPickerOpen = false
-            soundPickerTimer = nil
-        end, 1)
-        MenuUtil.CreateContextMenu(self, function(_, rootDescription)
+        local menu = MenuUtil.CreateContextMenu(self, function(_, rootDescription)
             rootDescription:SetScrollMode(400)
             local sounds = GetSoundList()
             for _, name in ipairs(sounds) do
@@ -268,17 +264,19 @@ local function CreateSoundPicker(parent, x, y, getValue, setValue)
                         setValue(name)
                         label:SetText(name)
                         PlayAlertSound(name)
-                        C_Timer.After(0.1, function()
-                            soundPickerOpen = false
-                            if soundPickerTimer then
-                                soundPickerTimer:Cancel()
-                                soundPickerTimer = nil
-                            end
-                        end)
                     end
                 )
             end
         end)
+        if menu then
+            soundPickerTimer = C_Timer.NewTicker(0.2, function()
+                if not menu:IsShown() then
+                    soundPickerOpen = false
+                    soundPickerTimer:Cancel()
+                    soundPickerTimer = nil
+                end
+            end)
+        end
     end)
 
     -- Preview button
