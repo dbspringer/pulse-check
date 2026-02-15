@@ -97,6 +97,7 @@ local useAuraFallback    = false
 local frameUnlocked      = false
 local frameSelected      = false
 local settingsDialog     = nil
+local settingsCategory   = nil
 local wasDragged         = false
 local soundPickerOpen    = false
 local soundPickerTimer   = nil
@@ -1176,12 +1177,14 @@ local function BuildOptionsPanel()
         PulseCheckDB = CopyTable(DEFAULTS)
         ApplyLayout()
         RefreshVisibility()
-        Settings.OpenToCategory("PulseCheck")
+        if settingsCategory then
+            Settings.OpenToCategory(settingsCategory:GetID())
+        end
         print("|cff00ccffPulseCheck:|r Settings reset to defaults.")
     end)
 
-    local category = Settings.RegisterCanvasLayoutCategory(panel, "PulseCheck")
-    Settings.RegisterAddOnCategory(category)
+    settingsCategory = Settings.RegisterCanvasLayoutCategory(panel, "PulseCheck")
+    Settings.RegisterAddOnCategory(settingsCategory)
 end
 
 -- ---------------------------------------------------------------------------
@@ -1198,7 +1201,9 @@ local function HandleSlashCommand(msg)
 
     if not cmd then
         -- Open options panel
-        Settings.OpenToCategory("PulseCheck")
+        if settingsCategory then
+            Settings.OpenToCategory(settingsCategory:GetID())
+        end
         return
     end
 
