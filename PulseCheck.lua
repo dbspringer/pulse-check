@@ -40,6 +40,13 @@ local BUILTIN_SOUNDS = {
     ["Ready Check"]     = 8960,
 }
 
+-- Preferred LSM sounds per alert, tried in order; first registered match wins
+local LSM_PREFERRED = {
+    lustActiveSound = { "BigWigs: Alert", "Bling", "Glass" },
+    lustReadySound  = { "BigWigs: Long", "Chime", "Ping" },
+    bresUsedSound   = { "BigWigs: Info", "Ding", "Knock" },
+}
+
 local DEFAULTS = {
     position    = nil,
     orientation = "horizontal",
@@ -1293,6 +1300,25 @@ local function OnEvent(self, event, ...)
                 end
             end
             PulseCheckDB.showAlways = nil
+        end
+
+        -- Apply preferred LSM sounds once if available
+        if not PulseCheckDB.lsmDefaultsApplied then
+            local lsm = GetLSM()
+            if lsm then
+                PulseCheckDB.lsmDefaultsApplied = true
+                for key, candidates in pairs(LSM_PREFERRED) do
+                    -- Only upgrade if user hasn't changed from built-in default
+                    if PulseCheckDB.sound[key] == DEFAULTS.sound[key] then
+                        for _, name in ipairs(candidates) do
+                            if lsm:IsValid("sound", name) then
+                                PulseCheckDB.sound[key] = name
+                                break
+                            end
+                        end
+                    end
+                end
+            end
         end
 
         CreateUI()
