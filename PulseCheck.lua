@@ -28,9 +28,26 @@ local ICON_GAP = 6
 local ICON_BRES = 136080
 local ICON_LUST = 136012
 
-local SOUND_LUST_ACTIVE = 8959   -- Raid warning
-local SOUND_LUST_READY  = 8960   -- Ready check
-local SOUND_BRES_USED   = 3175   -- Map ping
+local BUILTIN_SOUNDS = {
+    ["None"]            = false,
+    ["Alarm Clock"]     = 12867,
+    ["BNet Toast"]      = 18019,
+    ["LFG Role Check"]  = 17317,
+    ["Map Ping"]        = 3175,
+    ["PvP Queue"]       = 8459,
+    ["Raid Boss Emote"] = 12197,
+    ["Raid Warning"]    = 8959,
+    ["Ready Check"]     = 8960,
+}
+
+-- Preferred LSM sounds per alert, tried in order; first registered match wins.
+-- BigWigs registers its sounds with LSM; DBM does not.
+-- SharedMedia_Causese uses color-coded names (|cFFFF0000Name|r).
+local LSM_PREFERRED = {
+    lustActiveSound = { "|cFFFF0000Bloodlust|r", "BigWigs: Alert", "BigWigs: Alarm" },
+    lustReadySound  = { "|cFFFF0000Ready|r", "BigWigs: Long", "BigWigs: Victory" },
+    bresUsedSound   = { "|cFFFF0000Charge|r", "BigWigs: Info", "BigWigs: Beware" },
+}
 
 local DEFAULTS = {
     position    = nil,
@@ -45,9 +62,12 @@ local DEFAULTS = {
         solo           = false,
     },
     sound = {
-        lustActive = true,
-        lustReady  = true,
-        bresUsed   = false,
+        lustActive      = true,
+        lustActiveSound = "Alarm Clock",
+        lustReady       = true,
+        lustReadySound  = "LFG Role Check",
+        bresUsed        = false,
+        bresUsedSound   = "Raid Boss Emote",
     },
 }
 
@@ -77,7 +97,11 @@ local useAuraFallback    = false
 local frameUnlocked      = false
 local frameSelected      = false
 local settingsDialog     = nil
+local settingsCategory   = nil
 local wasDragged         = false
+local soundPickerOpen    = false
+local soundPickerTimer   = nil
+local dialogOnLeft       = false
 
 local SNAP_GRID_SIZE = 10  -- pixels; snap frame position on drag release
 
@@ -159,6 +183,184 @@ local function CreateSlider(parent, label, x, y, minVal, maxVal, step, getValue,
     return slider
 end
 
+local function GetLSM()
+    if LibStub then
+        return LibStub("LibSharedMedia-3.0", true)
+    end
+    return nil
+end
+
+local function GetSoundList()
+    local names = {}
+    for name in pairs(BUILTIN_SOUNDS) do
+        if name ~= "None" then
+            names[#names + 1] = name
+        end
+    end
+
+    local lsm = GetLSM()
+    if lsm then
+        local lsmSounds = lsm:List("sound")
+        for _, name in ipairs(lsmSounds) do
+            if not BUILTIN_SOUNDS[name] then
+                names[#names + 1] = name
+            end
+        end
+    end
+
+    table.sort(names)
+    table.insert(names, 1, "None")
+    return names
+end
+
+local function PlayAlertSound(soundName, fallbackKey)
+    if not soundName or soundName == "None" then return end
+
+    local kitID = BUILTIN_SOUNDS[soundName]
+    if kitID then
+        PlaySound(kitID)
+        return
+    end
+
+    local lsm = GetLSM()
+    if lsm then
+        local path = lsm:Fetch("sound", soundName)
+        if path then
+            PlaySoundFile(path, "Master")
+            return
+        end
+    end
+
+    -- LSM sound missing (addon removed?) — fall back to built-in default
+    if fallbackKey then
+        local defaultName = DEFAULTS.sound[fallbackKey]
+        local defaultID = defaultName and BUILTIN_SOUNDS[defaultName]
+        if defaultID then
+            PlaySound(defaultID)
+        end
+    end
+end
+
+local function CreateSoundPicker(parent, x, y, getValue, setValue)
+    local container = CreateFrame("Frame", nil, parent)
+    container:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    container:SetSize(210, 22)
+
+    -- Dropdown button
+    local btn = CreateFrame("Button", nil, container, "BackdropTemplate")
+    btn:SetPoint("TOPLEFT")
+    btn:SetSize(180, 22)
+    btn:SetBackdrop({
+        bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        edgeSize = 10,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    btn:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
+    btn:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+
+    local label = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    label:SetPoint("LEFT", 8, 0)
+    label:SetPoint("RIGHT", -20, 0)
+    label:SetJustifyH("LEFT")
+    label:SetText(getValue())
+
+    local arrow = btn:CreateTexture(nil, "OVERLAY")
+    arrow:SetPoint("RIGHT", -6, 0)
+    arrow:SetSize(12, 12)
+    arrow:SetTexture("Interface/ChatFrame/ChatFrameExpandArrow")
+    arrow:SetRotation(-math.pi / 2)
+
+    btn:SetScript("OnClick", function(self)
+        soundPickerOpen = true
+        if soundPickerTimer then soundPickerTimer:Cancel() end
+        local sounds = GetSoundList()
+        local selectedIndex = 1
+        local current = getValue()
+        for i, name in ipairs(sounds) do
+            if name == current then
+                selectedIndex = i
+                break
+            end
+        end
+        local menu = MenuUtil.CreateContextMenu(self, function(_, rootDescription)
+            rootDescription:SetScrollMode(400)
+            for _, name in ipairs(sounds) do
+                rootDescription:CreateRadio(
+                    name,
+                    function() return getValue() == name end,
+                    function()
+                        setValue(name)
+                        label:SetText(name)
+                        PlayAlertSound(name)
+                    end
+                )
+            end
+        end)
+        if menu then
+            -- Scroll to center the selected item
+            local scrollBox = menu.ScrollBox
+            if scrollBox and #sounds > 0 then
+                local fraction = math.max(0, math.min(1,
+                    (selectedIndex - 1) / math.max(1, #sounds - 1)))
+                scrollBox:SetScrollPercentage(fraction)
+            end
+            local menuWidth = menu:GetWidth()
+            if menuWidth and menuWidth > 0 then
+                menu:ClearAllPoints()
+                if dialogOnLeft then
+                    menu:SetPoint("RIGHT", self, "LEFT", -2, 0)
+                else
+                    local btnScale = self:GetEffectiveScale()
+                    local menuScale = menu:GetEffectiveScale()
+                    local btnRightPx = self:GetRight() * btnScale
+                    local menuWidthPx = menuWidth * menuScale
+                    if btnRightPx + menuWidthPx > GetScreenWidth() then
+                        menu:SetPoint("RIGHT", self, "LEFT", -2, 0)
+                    else
+                        menu:SetPoint("LEFT", self, "RIGHT", 2, 0)
+                    end
+                end
+            end
+            soundPickerTimer = C_Timer.NewTicker(0.2, function()
+                if not menu:IsShown() then
+                    soundPickerOpen = false
+                    soundPickerTimer:Cancel()
+                    soundPickerTimer = nil
+                end
+            end)
+        end
+    end)
+
+    -- Preview button
+    local preview = CreateFrame("Button", nil, container, "BackdropTemplate")
+    preview:SetPoint("LEFT", btn, "RIGHT", 4, 0)
+    preview:SetSize(22, 22)
+    preview:SetBackdrop({
+        bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        edgeSize = 10,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    preview:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
+    preview:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+
+    local playIcon = preview:CreateTexture(nil, "OVERLAY")
+    playIcon:SetPoint("CENTER")
+    playIcon:SetSize(12, 12)
+    playIcon:SetTexture("Interface/Buttons/UI-SpellbookIcon-NextPage-Up")
+
+    preview:SetScript("OnClick", function()
+        PlayAlertSound(getValue())
+    end)
+
+    function container.SetDisplayText(text)
+        label:SetText(text)
+    end
+
+    return container
+end
+
 -- ---------------------------------------------------------------------------
 -- Detection Functions
 -- ---------------------------------------------------------------------------
@@ -210,10 +412,10 @@ local function UpdateBloodlustState()
 
     -- Sound on state transitions
     if state.lustActive and not oldLustActive and PulseCheckDB.sound.lustActive then
-        PlaySound(SOUND_LUST_ACTIVE)
+        PlayAlertSound(PulseCheckDB.sound.lustActiveSound, "lustActiveSound")
     end
     if oldSated and not state.sated and PulseCheckDB.sound.lustReady then
-        PlaySound(SOUND_LUST_READY)
+        PlayAlertSound(PulseCheckDB.sound.lustReadySound, "lustReadySound")
     end
 
     return (state.lustActive ~= oldLustActive) or (state.sated ~= oldSated)
@@ -238,7 +440,7 @@ local function UpdateBresState()
     end
 
     if oldCharges > 0 and state.bresCharges < oldCharges and PulseCheckDB.sound.bresUsed then
-        PlaySound(SOUND_BRES_USED)
+        PlayAlertSound(PulseCheckDB.sound.bresUsedSound, "bresUsedSound")
     end
 
     return state.bresCharges ~= oldCharges
@@ -560,15 +762,25 @@ local function RepositionDialog()
     if not settingsDialog or not settingsDialog:IsShown() then return end
     local scale = mainFrame:GetEffectiveScale()
     local uiScale = UIParent:GetEffectiveScale()
-    local right = mainFrame:GetRight() * scale / uiScale
     local top = mainFrame:GetTop() * scale / uiScale
+    local right = mainFrame:GetRight() * scale / uiScale
+    local left = mainFrame:GetLeft() * scale / uiScale
+    local dialogWidth = settingsDialog:GetWidth() * settingsDialog:GetEffectiveScale() / uiScale
+    local screenWidth = GetScreenWidth() * uiScale / uiScale
+
     settingsDialog:ClearAllPoints()
-    settingsDialog:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", right + 8, top)
+    if right + 8 + dialogWidth > screenWidth then
+        dialogOnLeft = true
+        settingsDialog:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", left - 8, top)
+    else
+        dialogOnLeft = false
+        settingsDialog:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", right + 8, top)
+    end
 end
 
 local function CreateEditModeDialog()
     local dialog = CreateFrame("Frame", "PulseCheckEditDialog", UIParent, "BackdropTemplate")
-    dialog:SetSize(250, 435)
+    dialog:SetSize(250, 520)
     dialog:SetBackdrop({
         bgFile = "Interface/Tooltips/UI-Tooltip-Background",
         edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
@@ -642,20 +854,32 @@ local function CreateEditModeDialog()
         function() return PulseCheckDB.sound.lustActive end,
         function(val) PulseCheckDB.sound.lustActive = val end
     )
+    local lustActivePicker = CreateSoundPicker(dialog, 30, -332,
+        function() return PulseCheckDB.sound.lustActiveSound end,
+        function(val) PulseCheckDB.sound.lustActiveSound = val end
+    )
 
-    local lustReadyCB = CreateCheckbox(dialog, "Lust ready", 12, -332,
+    local lustReadyCB = CreateCheckbox(dialog, "Lust ready", 12, -358,
         function() return PulseCheckDB.sound.lustReady end,
         function(val) PulseCheckDB.sound.lustReady = val end
     )
+    local lustReadyPicker = CreateSoundPicker(dialog, 30, -384,
+        function() return PulseCheckDB.sound.lustReadySound end,
+        function(val) PulseCheckDB.sound.lustReadySound = val end
+    )
 
-    local bresUsedCB = CreateCheckbox(dialog, "Bres charge used", 12, -358,
+    local bresUsedCB = CreateCheckbox(dialog, "Bres charge used", 12, -410,
         function() return PulseCheckDB.sound.bresUsed end,
         function(val) PulseCheckDB.sound.bresUsed = val end
+    )
+    local bresUsedPicker = CreateSoundPicker(dialog, 30, -436,
+        function() return PulseCheckDB.sound.bresUsedSound end,
+        function(val) PulseCheckDB.sound.bresUsedSound = val end
     )
 
     -- Reset Defaults button
     local resetBtn = CreateFrame("Button", nil, dialog, "UIPanelButtonTemplate")
-    resetBtn:SetPoint("TOPLEFT", 12, -396)
+    resetBtn:SetPoint("TOPLEFT", 12, -478)
     resetBtn:SetSize(120, 24)
     resetBtn:SetText("Reset Defaults")
     resetBtn:SetScript("OnClick", function()
@@ -670,8 +894,11 @@ local function CreateEditModeDialog()
             visCB[opt.key]:SetChecked(PulseCheckDB.visibility[opt.key])
         end
         lustActiveCB:SetChecked(PulseCheckDB.sound.lustActive)
+        lustActivePicker.SetDisplayText(PulseCheckDB.sound.lustActiveSound)
         lustReadyCB:SetChecked(PulseCheckDB.sound.lustReady)
+        lustReadyPicker.SetDisplayText(PulseCheckDB.sound.lustReadySound)
         bresUsedCB:SetChecked(PulseCheckDB.sound.bresUsed)
+        bresUsedPicker.SetDisplayText(PulseCheckDB.sound.bresUsedSound)
         print("|cff00ccffPulseCheck:|r Settings reset to defaults.")
     end)
 
@@ -680,6 +907,7 @@ local function CreateEditModeDialog()
 end
 
 local function SetFrameSelected(selected)
+    if not selected and soundPickerOpen then return end
     frameSelected = selected
     if not mainFrame then return end
 
@@ -851,16 +1079,24 @@ local function BuildOptionsPanel()
     local panel = CreateFrame("Frame")
     panel.name = "PulseCheck"
 
-    local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", 0, -2)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -26, 2)
+
+    local content = CreateFrame("Frame", nil, scrollFrame)
+    content:SetSize(600, 620)
+    scrollFrame:SetScrollChild(content)
+
+    local title = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -16)
     title:SetText("PulseCheck")
 
-    local subtitle = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    local subtitle = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
     subtitle:SetText("Battle res and bloodlust cooldown tracking")
 
     -- Visibility
-    local visHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local visHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     visHeader:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", 0, -20)
     visHeader:SetText("Visibility")
 
@@ -873,7 +1109,7 @@ local function BuildOptionsPanel()
         { key = "solo",           label = "Solo",                  y = -240 },
     }
     for _, opt in ipairs(panelVisOptions) do
-        CreateCheckbox(panel, opt.label, 16, opt.y,
+        CreateCheckbox(content, opt.label, 16, opt.y,
             function() return PulseCheckDB.visibility[opt.key] end,
             function(val)
                 PulseCheckDB.visibility[opt.key] = val
@@ -883,7 +1119,7 @@ local function BuildOptionsPanel()
     end
 
     -- Orientation
-    CreateCheckbox(panel, "Vertical orientation", 16, -280,
+    CreateCheckbox(content, "Vertical orientation", 16, -280,
         function() return PulseCheckDB.orientation == "vertical" end,
         function(val)
             PulseCheckDB.orientation = val and "vertical" or "horizontal"
@@ -892,7 +1128,7 @@ local function BuildOptionsPanel()
     )
 
     -- Scale
-    CreateSlider(panel, "Scale", 20, -330, 0.5, 2.0, 0.1,
+    CreateSlider(content, "Scale", 20, -330, 0.5, 2.0, 0.1,
         function() return PulseCheckDB.scale end,
         function(val)
             PulseCheckDB.scale = val
@@ -901,40 +1137,54 @@ local function BuildOptionsPanel()
     )
 
     -- Sounds header
-    local soundHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local soundHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     soundHeader:SetPoint("TOPLEFT", 16, -380)
     soundHeader:SetText("Sounds")
 
-    CreateCheckbox(panel, "Bloodlust activated", 16, -400,
+    CreateCheckbox(content, "Bloodlust activated", 16, -400,
         function() return PulseCheckDB.sound.lustActive end,
         function(val) PulseCheckDB.sound.lustActive = val end
     )
+    CreateSoundPicker(content, 34, -426,
+        function() return PulseCheckDB.sound.lustActiveSound end,
+        function(val) PulseCheckDB.sound.lustActiveSound = val end
+    )
 
-    CreateCheckbox(panel, "Bloodlust ready (sated expired)", 16, -430,
+    CreateCheckbox(content, "Bloodlust ready (sated expired)", 16, -452,
         function() return PulseCheckDB.sound.lustReady end,
         function(val) PulseCheckDB.sound.lustReady = val end
     )
+    CreateSoundPicker(content, 34, -478,
+        function() return PulseCheckDB.sound.lustReadySound end,
+        function(val) PulseCheckDB.sound.lustReadySound = val end
+    )
 
-    CreateCheckbox(panel, "Battle res charge used", 16, -460,
+    CreateCheckbox(content, "Battle res charge used", 16, -504,
         function() return PulseCheckDB.sound.bresUsed end,
         function(val) PulseCheckDB.sound.bresUsed = val end
     )
+    CreateSoundPicker(content, 34, -530,
+        function() return PulseCheckDB.sound.bresUsedSound end,
+        function(val) PulseCheckDB.sound.bresUsedSound = val end
+    )
 
     -- Reset button
-    local resetBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    resetBtn:SetPoint("TOPLEFT", 16, -510)
+    local resetBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    resetBtn:SetPoint("TOPLEFT", 16, -580)
     resetBtn:SetSize(120, 24)
     resetBtn:SetText("Reset Defaults")
     resetBtn:SetScript("OnClick", function()
         PulseCheckDB = CopyTable(DEFAULTS)
         ApplyLayout()
         RefreshVisibility()
-        Settings.OpenToCategory("PulseCheck")
+        if settingsCategory then
+            Settings.OpenToCategory(settingsCategory:GetID())
+        end
         print("|cff00ccffPulseCheck:|r Settings reset to defaults.")
     end)
 
-    local category = Settings.RegisterCanvasLayoutCategory(panel, "PulseCheck")
-    Settings.RegisterAddOnCategory(category)
+    settingsCategory = Settings.RegisterCanvasLayoutCategory(panel, "PulseCheck")
+    Settings.RegisterAddOnCategory(settingsCategory)
 end
 
 -- ---------------------------------------------------------------------------
@@ -951,7 +1201,9 @@ local function HandleSlashCommand(msg)
 
     if not cmd then
         -- Open options panel
-        Settings.OpenToCategory("PulseCheck")
+        if settingsCategory then
+            Settings.OpenToCategory(settingsCategory:GetID())
+        end
         return
     end
 
@@ -1089,6 +1341,25 @@ local function OnEvent(self, event, ...)
         self:UnregisterEvent("ADDON_LOADED")
 
     elseif event == "PLAYER_ENTERING_WORLD" then
+        -- Apply preferred LSM sounds once if available (must run here,
+        -- not ADDON_LOADED, because LSM sounds aren't registered yet at load time)
+        if not PulseCheckDB.lsmDefaultsApplied then
+            local lsm = GetLSM()
+            if lsm then
+                PulseCheckDB.lsmDefaultsApplied = true
+                for key, candidates in pairs(LSM_PREFERRED) do
+                    if PulseCheckDB.sound[key] == DEFAULTS.sound[key] then
+                        for _, name in ipairs(candidates) do
+                            if lsm:IsValid("sound", name) then
+                                PulseCheckDB.sound[key] = name
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
         CheckSecretValues()
         if useAuraFallback then
             StartAuraFallbackTicker()
