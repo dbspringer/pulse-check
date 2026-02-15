@@ -40,11 +40,12 @@ local BUILTIN_SOUNDS = {
     ["Ready Check"]     = 8960,
 }
 
--- Preferred LSM sounds per alert, tried in order; first registered match wins
+-- Preferred LSM sounds per alert, tried in order; first registered match wins.
+-- BigWigs registers its sounds with LSM; DBM does not.
 local LSM_PREFERRED = {
-    lustActiveSound = { "BigWigs: Alert", "Bling", "Glass" },
-    lustReadySound  = { "BigWigs: Long", "Chime", "Ping" },
-    bresUsedSound   = { "BigWigs: Info", "Ding", "Knock" },
+    lustActiveSound = { "BigWigs: Alert", "BigWigs: Alarm", "Bling", "Glass" },
+    lustReadySound  = { "BigWigs: Long", "BigWigs: Victory", "Chime", "Ping" },
+    bresUsedSound   = { "BigWigs: Info", "BigWigs: Beware", "Ding", "Knock" },
 }
 
 local DEFAULTS = {
@@ -1290,7 +1291,7 @@ local function OnEvent(self, event, ...)
         local name = ...
         if name ~= ADDON_NAME then return end
 
-        PulseCheckDB = MergeDefaults(PulseCheckDB, DEFAULTS)
+        PulseCheckDB = CopyTable(DEFAULTS)  -- TEMP: force defaults for testing
 
         -- Migrate from old showAlways boolean to visibility table
         if PulseCheckDB.showAlways ~= nil then
