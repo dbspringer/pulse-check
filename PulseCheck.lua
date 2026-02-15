@@ -249,6 +249,7 @@ local function CreateSoundPicker(parent, x, y, getValue, setValue)
 
     btn:SetScript("OnClick", function(self)
         MenuUtil.CreateContextMenu(self, function(_, rootDescription)
+            rootDescription:SetScrollMode(400)
             local sounds = GetSoundList()
             for _, name in ipairs(sounds) do
                 rootDescription:CreateRadio(
