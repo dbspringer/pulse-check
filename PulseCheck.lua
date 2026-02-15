@@ -920,7 +920,11 @@ local function SetupEditMode()
     mainFrame:HookScript("OnEvent", function(self, event)
         if event == "GLOBAL_MOUSE_DOWN" and frameSelected then
             if soundPickerOpen then
-                soundPickerOpen = false
+                C_Timer.After(0, function()
+                    if not (Menu and Menu.GetOpenMenu and Menu.GetOpenMenu()) then
+                        soundPickerOpen = false
+                    end
+                end)
             elseif not mainFrame:IsMouseOver()
                and not (settingsDialog and settingsDialog:IsMouseOver()) then
                 SetFrameSelected(false)
