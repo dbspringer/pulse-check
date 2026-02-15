@@ -5,4 +5,5 @@
 ## Version: 1.0.0
 ## SavedVariables: PulseCheckDB
 
+Locales/enUS.lua
 PulseCheck.lua

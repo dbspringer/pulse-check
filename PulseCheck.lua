@@ -3,6 +3,7 @@
 -- ============================================================================
 
 local ADDON_NAME = ...
+local L = PC_L
 
 -- ---------------------------------------------------------------------------
 -- Constants
@@ -98,6 +99,7 @@ local frameUnlocked      = false
 local frameSelected      = false
 local settingsDialog     = nil
 local settingsCategory   = nil
+local settingsPanel      = nil
 local wasDragged         = false
 local soundPickerOpen    = false
 local soundPickerTimer   = nil
@@ -735,7 +737,8 @@ end
 
 local function RefreshVisibility()
     if not mainFrame then return end
-    if frameUnlocked or ShouldShow() then
+    local panelOpen = (settingsDialog and settingsDialog:IsShown()) or (settingsPanel and settingsPanel:IsVisible())
+    if frameUnlocked or ShouldShow() or panelOpen then
         mainFrame:Show()
     else
         mainFrame:Hide()
@@ -798,7 +801,7 @@ local function CreateEditModeDialog()
     title:SetText("PulseCheck")
 
     -- Layout
-    local vertCB = CreateCheckbox(dialog, "Vertical layout", 12, -36,
+    local vertCB = CreateCheckbox(dialog, L.VERTICAL_ORIENTATION, 12, -36,
         function() return PulseCheckDB.orientation == "vertical" end,
         function(val)
             PulseCheckDB.orientation = val and "vertical" or "horizontal"
@@ -808,7 +811,7 @@ local function CreateEditModeDialog()
     )
 
     local scaleRepositionTicker = nil
-    local scaleSlider = CreateSlider(dialog, "Scale", 16, -72, 0.5, 2.0, 0.1,
+    local scaleSlider = CreateSlider(dialog, L.SCALE, 16, -72, 0.5, 2.0, 0.1,
         function() return PulseCheckDB.scale end,
         function(val)
             PulseCheckDB.scale = val
@@ -824,16 +827,16 @@ local function CreateEditModeDialog()
     -- Visibility header
     local visHeader = dialog:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     visHeader:SetPoint("TOPLEFT", 12, -110)
-    visHeader:SetText("Visibility")
+    visHeader:SetText(L.HEADER_VISIBILITY)
 
     local visCB = {}
     local visOptions = {
-        { key = "dungeons",       label = "Dungeons",          y = -128 },
-        { key = "raids",          label = "Raids",             y = -154 },
-        { key = "scenarios",      label = "Scenarios / Delves", y = -180 },
-        { key = "battlegrounds",  label = "Battlegrounds",     y = -206 },
-        { key = "openWorld",      label = "Open world groups", y = -232 },
-        { key = "solo",           label = "Solo",              y = -258 },
+        { key = "dungeons",       label = L.VIS_DUNGEONS,       y = -128 },
+        { key = "raids",          label = L.VIS_RAIDS,          y = -154 },
+        { key = "scenarios",      label = L.VIS_SCENARIOS,      y = -180 },
+        { key = "battlegrounds",  label = L.VIS_BATTLEGROUNDS,  y = -206 },
+        { key = "openWorld",      label = L.VIS_OPEN_WORLD,     y = -232 },
+        { key = "solo",           label = L.VIS_SOLO,           y = -258 },
     }
     for _, opt in ipairs(visOptions) do
         visCB[opt.key] = CreateCheckbox(dialog, opt.label, 12, opt.y,
@@ -848,9 +851,9 @@ local function CreateEditModeDialog()
     -- Sounds header
     local soundHeader = dialog:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     soundHeader:SetPoint("TOPLEFT", 12, -288)
-    soundHeader:SetText("Sounds")
+    soundHeader:SetText(L.HEADER_SOUNDS)
 
-    local lustActiveCB = CreateCheckbox(dialog, "Lust activated", 12, -306,
+    local lustActiveCB = CreateCheckbox(dialog, L.SOUND_LUST_ACTIVE, 12, -306,
         function() return PulseCheckDB.sound.lustActive end,
         function(val) PulseCheckDB.sound.lustActive = val end
     )
@@ -859,7 +862,7 @@ local function CreateEditModeDialog()
         function(val) PulseCheckDB.sound.lustActiveSound = val end
     )
 
-    local lustReadyCB = CreateCheckbox(dialog, "Lust ready", 12, -358,
+    local lustReadyCB = CreateCheckbox(dialog, L.SOUND_LUST_READY, 12, -358,
         function() return PulseCheckDB.sound.lustReady end,
         function(val) PulseCheckDB.sound.lustReady = val end
     )
@@ -868,7 +871,7 @@ local function CreateEditModeDialog()
         function(val) PulseCheckDB.sound.lustReadySound = val end
     )
 
-    local bresUsedCB = CreateCheckbox(dialog, "Bres charge used", 12, -410,
+    local bresUsedCB = CreateCheckbox(dialog, L.SOUND_BRES_USED, 12, -410,
         function() return PulseCheckDB.sound.bresUsed end,
         function(val) PulseCheckDB.sound.bresUsed = val end
     )
@@ -881,7 +884,7 @@ local function CreateEditModeDialog()
     local resetBtn = CreateFrame("Button", nil, dialog, "UIPanelButtonTemplate")
     resetBtn:SetPoint("TOPLEFT", 12, -478)
     resetBtn:SetSize(120, 24)
-    resetBtn:SetText("Reset Defaults")
+    resetBtn:SetText(L.RESET_DEFAULTS)
     resetBtn:SetScript("OnClick", function()
         PulseCheckDB = CopyTable(DEFAULTS)
         ApplyLayout()
@@ -899,7 +902,7 @@ local function CreateEditModeDialog()
         lustReadyPicker.SetDisplayText(PulseCheckDB.sound.lustReadySound)
         bresUsedCB:SetChecked(PulseCheckDB.sound.bresUsed)
         bresUsedPicker.SetDisplayText(PulseCheckDB.sound.bresUsedSound)
-        print("|cff00ccffPulseCheck:|r Settings reset to defaults.")
+        print("|cff00ccffPulseCheck:|r " .. L.MSG_RESET)
     end)
 
     dialog:Hide()
@@ -1076,15 +1079,25 @@ end
 -- ---------------------------------------------------------------------------
 
 local function BuildOptionsPanel()
-    local panel = CreateFrame("Frame")
-    panel.name = "PulseCheck"
+    settingsPanel = CreateFrame("Frame")
+    settingsPanel.name = "PulseCheck"
 
-    local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    settingsPanel:SetScript("OnShow", function()
+        if mainFrame then mainFrame:Show() end
+    end)
+
+    if SettingsPanel then
+        SettingsPanel:HookScript("OnHide", function()
+            RefreshVisibility()
+        end)
+    end
+
+    local scrollFrame = CreateFrame("ScrollFrame", nil, settingsPanel, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 0, -2)
     scrollFrame:SetPoint("BOTTOMRIGHT", -26, 2)
 
     local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetSize(600, 620)
+    content:SetSize(600, 510)
     scrollFrame:SetScrollChild(content)
 
     local title = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -1093,33 +1106,14 @@ local function BuildOptionsPanel()
 
     local subtitle = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
-    subtitle:SetText("Battle res and bloodlust cooldown tracking")
+    subtitle:SetText(L.ADDON_SUBTITLE)
 
-    -- Visibility
-    local visHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    visHeader:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", 0, -20)
-    visHeader:SetText("Visibility")
-
-    local panelVisOptions = {
-        { key = "dungeons",       label = "Dungeons",              y = -90  },
-        { key = "raids",          label = "Raids",                 y = -120 },
-        { key = "scenarios",      label = "Scenarios / Delves",    y = -150 },
-        { key = "battlegrounds",  label = "Battlegrounds / Arena", y = -180 },
-        { key = "openWorld",      label = "Open world groups",     y = -210 },
-        { key = "solo",           label = "Solo",                  y = -240 },
-    }
-    for _, opt in ipairs(panelVisOptions) do
-        CreateCheckbox(content, opt.label, 16, opt.y,
-            function() return PulseCheckDB.visibility[opt.key] end,
-            function(val)
-                PulseCheckDB.visibility[opt.key] = val
-                RefreshVisibility()
-            end
-        )
-    end
+    local hint = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    hint:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", 0, -4)
+    hint:SetText(L.EDIT_MODE_HINT)
 
     -- Orientation
-    CreateCheckbox(content, "Vertical orientation", 16, -280,
+    CreateCheckbox(content, L.VERTICAL_ORIENTATION, 16, -72,
         function() return PulseCheckDB.orientation == "vertical" end,
         function(val)
             PulseCheckDB.orientation = val and "vertical" or "horizontal"
@@ -1128,7 +1122,7 @@ local function BuildOptionsPanel()
     )
 
     -- Scale
-    CreateSlider(content, "Scale", 20, -330, 0.5, 2.0, 0.1,
+    CreateSlider(content, L.SCALE, 20, -110, 0.5, 2.0, 0.1,
         function() return PulseCheckDB.scale end,
         function(val)
             PulseCheckDB.scale = val
@@ -1136,43 +1130,72 @@ local function BuildOptionsPanel()
         end
     )
 
+    -- Visibility
+    local visHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    visHeader:SetPoint("TOPLEFT", 16, -160)
+    visHeader:SetText(L.HEADER_VISIBILITY)
+
+    local panelVisOptions = {
+        { key = "dungeons",       label = L.VIS_DUNGEONS,       col = 1, row = 1 },
+        { key = "raids",          label = L.VIS_RAIDS,          col = 2, row = 1 },
+        { key = "scenarios",      label = L.VIS_SCENARIOS,      col = 1, row = 2 },
+        { key = "battlegrounds",  label = L.VIS_BATTLEGROUNDS,  col = 2, row = 2 },
+        { key = "openWorld",      label = L.VIS_OPEN_WORLD,     col = 1, row = 3 },
+        { key = "solo",           label = L.VIS_SOLO,           col = 2, row = 3 },
+    }
+    local visBaseY = -180
+    local visRowH = 30
+    local visCol1X = 16
+    local visCol2X = 250
+    for _, opt in ipairs(panelVisOptions) do
+        local x = opt.col == 1 and visCol1X or visCol2X
+        local y = visBaseY - (opt.row - 1) * visRowH
+        CreateCheckbox(content, opt.label, x, y,
+            function() return PulseCheckDB.visibility[opt.key] end,
+            function(val)
+                PulseCheckDB.visibility[opt.key] = val
+                RefreshVisibility()
+            end
+        )
+    end
+
     -- Sounds header
     local soundHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    soundHeader:SetPoint("TOPLEFT", 16, -380)
-    soundHeader:SetText("Sounds")
+    soundHeader:SetPoint("TOPLEFT", 16, -270)
+    soundHeader:SetText(L.HEADER_SOUNDS)
 
-    CreateCheckbox(content, "Bloodlust activated", 16, -400,
+    CreateCheckbox(content, L.SOUND_LUST_ACTIVE, 16, -290,
         function() return PulseCheckDB.sound.lustActive end,
         function(val) PulseCheckDB.sound.lustActive = val end
     )
-    CreateSoundPicker(content, 34, -426,
+    CreateSoundPicker(content, 34, -316,
         function() return PulseCheckDB.sound.lustActiveSound end,
         function(val) PulseCheckDB.sound.lustActiveSound = val end
     )
 
-    CreateCheckbox(content, "Bloodlust ready (sated expired)", 16, -452,
+    CreateCheckbox(content, L.SOUND_LUST_READY, 16, -342,
         function() return PulseCheckDB.sound.lustReady end,
         function(val) PulseCheckDB.sound.lustReady = val end
     )
-    CreateSoundPicker(content, 34, -478,
+    CreateSoundPicker(content, 34, -368,
         function() return PulseCheckDB.sound.lustReadySound end,
         function(val) PulseCheckDB.sound.lustReadySound = val end
     )
 
-    CreateCheckbox(content, "Battle res charge used", 16, -504,
+    CreateCheckbox(content, L.SOUND_BRES_USED, 16, -394,
         function() return PulseCheckDB.sound.bresUsed end,
         function(val) PulseCheckDB.sound.bresUsed = val end
     )
-    CreateSoundPicker(content, 34, -530,
+    CreateSoundPicker(content, 34, -420,
         function() return PulseCheckDB.sound.bresUsedSound end,
         function(val) PulseCheckDB.sound.bresUsedSound = val end
     )
 
     -- Reset button
     local resetBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    resetBtn:SetPoint("TOPLEFT", 16, -580)
+    resetBtn:SetPoint("TOPLEFT", 16, -470)
     resetBtn:SetSize(120, 24)
-    resetBtn:SetText("Reset Defaults")
+    resetBtn:SetText(L.RESET_DEFAULTS)
     resetBtn:SetScript("OnClick", function()
         PulseCheckDB = CopyTable(DEFAULTS)
         ApplyLayout()
@@ -1180,10 +1203,10 @@ local function BuildOptionsPanel()
         if settingsCategory then
             Settings.OpenToCategory(settingsCategory:GetID())
         end
-        print("|cff00ccffPulseCheck:|r Settings reset to defaults.")
+        print("|cff00ccffPulseCheck:|r " .. L.MSG_RESET)
     end)
 
-    settingsCategory = Settings.RegisterCanvasLayoutCategory(panel, "PulseCheck")
+    settingsCategory = Settings.RegisterCanvasLayoutCategory(settingsPanel, "PulseCheck")
     Settings.RegisterAddOnCategory(settingsCategory)
 end
 
@@ -1209,13 +1232,13 @@ local function HandleSlashCommand(msg)
 
     if cmd == "unlock" then
         SetFrameUnlocked(true)
-        print("|cff00ccffPulseCheck:|r Frame unlocked. Drag to reposition.")
+        print("|cff00ccffPulseCheck:|r " .. L.MSG_UNLOCKED)
         return
     end
 
     if cmd == "lock" then
         SetFrameUnlocked(false)
-        print("|cff00ccffPulseCheck:|r Frame locked.")
+        print("|cff00ccffPulseCheck:|r " .. L.MSG_LOCKED)
         return
     end
 
@@ -1226,7 +1249,7 @@ local function HandleSlashCommand(msg)
             PulseCheckDB.orientation = "horizontal"
         end
         ApplyLayout()
-        print("|cff00ccffPulseCheck:|r Orientation set to " .. PulseCheckDB.orientation .. ".")
+        print("|cff00ccffPulseCheck:|r " .. string.format(L.MSG_ORIENTATION, PulseCheckDB.orientation))
         return
     end
 
@@ -1235,9 +1258,9 @@ local function HandleSlashCommand(msg)
         if val and val >= 0.5 and val <= 2.0 then
             PulseCheckDB.scale = val
             ApplyLayout()
-            print("|cff00ccffPulseCheck:|r Scale set to " .. val .. ".")
+            print("|cff00ccffPulseCheck:|r " .. string.format(L.MSG_SCALE, val))
         else
-            print("|cff00ccffPulseCheck:|r Usage: /plc scale <0.5-2.0>")
+            print("|cff00ccffPulseCheck:|r " .. L.MSG_SCALE_USAGE)
         end
         return
     end
@@ -1249,21 +1272,21 @@ local function HandleSlashCommand(msg)
             local enabled = value == "on"
             PulseCheckDB.sound.lustActive = enabled
             PulseCheckDB.sound.lustReady = enabled
-            print("|cff00ccffPulseCheck:|r Bloodlust sounds " .. value .. ".")
+            print("|cff00ccffPulseCheck:|r " .. string.format(L.MSG_SOUND_TOGGLE, "Bloodlust", value))
         elseif target == "bres" and (value == "on" or value == "off") then
             PulseCheckDB.sound.bresUsed = value == "on"
-            print("|cff00ccffPulseCheck:|r Battle res sounds " .. value .. ".")
+            print("|cff00ccffPulseCheck:|r " .. string.format(L.MSG_SOUND_TOGGLE, "Battle res", value))
         else
-            print("|cff00ccffPulseCheck:|r Usage: /plc sound <lust|bres> <on|off>")
+            print("|cff00ccffPulseCheck:|r " .. L.MSG_SOUND_USAGE)
         end
         return
     end
 
     if cmd == "show" then
         local VISIBILITY_KEYS = {
-            dungeons = "Dungeons", raids = "Raids", scenarios = "Scenarios",
-            battlegrounds = "Battlegrounds", openworld = "Open world groups",
-            solo = "Solo",
+            dungeons = L.VIS_DUNGEONS, raids = L.VIS_RAIDS,
+            scenarios = L.VIS_SCENARIOS, battlegrounds = L.VIS_BATTLEGROUNDS,
+            openworld = L.VIS_OPEN_WORLD, solo = L.VIS_SOLO,
         }
         local target = args[2]
         local value = args[3]
@@ -1271,15 +1294,15 @@ local function HandleSlashCommand(msg)
         local dbKey = target == "openworld" and "openWorld" or target
         if target and VISIBILITY_KEYS[target] and (value == "on" or value == "off") then
             PulseCheckDB.visibility[dbKey] = value == "on"
-            print("|cff00ccffPulseCheck:|r " .. VISIBILITY_KEYS[target] .. " visibility " .. value .. ".")
+            print("|cff00ccffPulseCheck:|r " .. string.format(L.MSG_VIS_TOGGLE, VISIBILITY_KEYS[target], value))
         elseif target == "all" and (value == "on" or value == "off") then
             local enabled = value == "on"
             for key in pairs(PulseCheckDB.visibility) do
                 PulseCheckDB.visibility[key] = enabled
             end
-            print("|cff00ccffPulseCheck:|r All visibility " .. value .. ".")
+            print("|cff00ccffPulseCheck:|r " .. string.format(L.MSG_VIS_ALL, value))
         else
-            print("|cff00ccffPulseCheck:|r Usage: /plc show <dungeons|raids|scenarios|battlegrounds|openworld|solo|all> <on|off>")
+            print("|cff00ccffPulseCheck:|r " .. L.MSG_VIS_USAGE)
         end
         RefreshVisibility()
         return
@@ -1289,22 +1312,22 @@ local function HandleSlashCommand(msg)
         PulseCheckDB = CopyTable(DEFAULTS)
         ApplyLayout()
         RefreshVisibility()
-        print("|cff00ccffPulseCheck:|r Settings reset to defaults.")
+        print("|cff00ccffPulseCheck:|r " .. L.MSG_RESET)
         return
     end
 
     if cmd ~= "help" then
-        print("|cff00ccffPulseCheck:|r Unknown command '" .. cmd .. "'.")
+        print("|cff00ccffPulseCheck:|r " .. string.format(L.MSG_UNKNOWN_CMD, cmd))
     end
-    print("|cff00ccffPulseCheck commands:|r")
-    print("  /plc — Open settings")
-    print("  /plc help — Show this help")
-    print("  /plc lock|unlock — Lock/unlock frame position")
-    print("  /plc orientation — Toggle horizontal/vertical")
-    print("  /plc scale <0.5-2.0> — Set icon scale")
-    print("  /plc sound <lust|bres> <on|off> — Toggle sounds")
-    print("  /plc show <type|all> <on|off> — Toggle visibility")
-    print("  /plc reset — Reset to defaults")
+    print("|cff00ccff" .. L.HELP_HEADER .. "|r")
+    print(L.HELP_OPEN)
+    print(L.HELP_HELP)
+    print(L.HELP_LOCK)
+    print(L.HELP_ORIENTATION)
+    print(L.HELP_SCALE)
+    print(L.HELP_SOUND)
+    print(L.HELP_SHOW)
+    print(L.HELP_RESET)
 end
 
 SLASH_PULSECHECK1 = "/pulsecheck"
