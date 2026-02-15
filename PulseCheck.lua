@@ -1010,7 +1010,7 @@ local function BuildOptionsPanel()
     scrollFrame:SetPoint("BOTTOMRIGHT", -26, 2)
 
     local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetSize(scrollFrame:GetWidth() or 600, 620)
+    content:SetSize(600, 620)
     scrollFrame:SetScrollChild(content)
 
     local title = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
