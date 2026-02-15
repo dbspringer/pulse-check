@@ -176,7 +176,7 @@ local function CreateSlider(parent, label, x, y, minVal, maxVal, step, getValue,
     slider:SetValue(getValue())
     slider.Low:SetText(minVal)
     slider.High:SetText(maxVal)
-    slider.Text:SetText(label .. ": " .. getValue())
+    slider.Text:SetText(label .. ": " .. string.format("%.1f", getValue()))
     slider:SetScript("OnValueChanged", function(self, value)
         value = math.floor(value / step + 0.5) * step
         self.Text:SetText(label .. ": " .. string.format("%.1f", value))
@@ -548,15 +548,36 @@ local function ApplyLayout()
         )
     end
 
-    -- Restore saved position or default to center
-    if PulseCheckDB.position then
-        local pos = PulseCheckDB.position
-        mainFrame:ClearAllPoints()
-        mainFrame:SetPoint(pos.point, UIParent, pos.relativePoint, pos.x, pos.y)
+    -- Restore saved position or default to center.
+    -- Migrate old TOPLEFT-anchored positions by discarding them (pre-release only).
+    local pos = PulseCheckDB.position
+    if pos and pos.point == "TOPLEFT" then
+        PulseCheckDB.position = nil
+        pos = nil
+    end
+    mainFrame:ClearAllPoints()
+    if pos then
+        mainFrame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", pos.x, pos.y)
     else
-        mainFrame:ClearAllPoints()
         mainFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     end
+end
+
+local function SnapToGrid(value)
+    return math.floor(value / SNAP_GRID_SIZE + 0.5) * SNAP_GRID_SIZE
+end
+
+-- Update scale and re-layout. Adjust stored offset so the visual center
+-- stays fixed: visual = offset * scale, so new_offset = old_offset * old/new.
+local function SetScale(newScale)
+    local oldScale = PulseCheckDB.scale
+    PulseCheckDB.scale = newScale
+    if PulseCheckDB.position then
+        local pos = PulseCheckDB.position
+        pos.x = pos.x * oldScale / newScale
+        pos.y = pos.y * oldScale / newScale
+    end
+    ApplyLayout()
 end
 
 local function CreateUI()
@@ -737,7 +758,7 @@ end
 
 local function RefreshVisibility()
     if not mainFrame then return end
-    local panelOpen = (settingsDialog and settingsDialog:IsShown()) or (settingsPanel and settingsPanel:IsVisible())
+    local panelOpen = (settingsDialog and settingsDialog:IsShown()) or (SettingsPanel and SettingsPanel:IsShown())
     if frameUnlocked or ShouldShow() or panelOpen then
         mainFrame:Show()
     else
@@ -757,9 +778,6 @@ end
 -- Edit Mode Integration
 -- ---------------------------------------------------------------------------
 
-local function SnapToGrid(value)
-    return math.floor(value / SNAP_GRID_SIZE + 0.5) * SNAP_GRID_SIZE
-end
 
 local function RepositionDialog()
     if not settingsDialog or not settingsDialog:IsShown() then return end
@@ -814,8 +832,7 @@ local function CreateEditModeDialog()
     local scaleSlider = CreateSlider(dialog, L.SCALE, 16, -72, 0.5, 2.0, 0.1,
         function() return PulseCheckDB.scale end,
         function(val)
-            PulseCheckDB.scale = val
-            mainFrame:SetScale(val)
+            SetScale(val)
             if scaleRepositionTicker then scaleRepositionTicker:Cancel() end
             scaleRepositionTicker = C_Timer.NewTicker(1, function()
                 scaleRepositionTicker = nil
@@ -883,7 +900,8 @@ local function CreateEditModeDialog()
     -- Reset Defaults button
     local resetBtn = CreateFrame("Button", nil, dialog, "UIPanelButtonTemplate")
     resetBtn:SetPoint("TOPLEFT", 12, -478)
-    resetBtn:SetSize(120, 24)
+    resetBtn:SetPoint("RIGHT", dialog, "RIGHT", -12, 0)
+    resetBtn:SetHeight(24)
     resetBtn:SetText(L.RESET_DEFAULTS)
     resetBtn:SetScript("OnClick", function()
         PulseCheckDB = CopyTable(DEFAULTS)
@@ -903,6 +921,20 @@ local function CreateEditModeDialog()
         bresUsedCB:SetChecked(PulseCheckDB.sound.bresUsed)
         bresUsedPicker.SetDisplayText(PulseCheckDB.sound.bresUsedSound)
         print("|cff00ccffPulseCheck:|r " .. L.MSG_RESET)
+    end)
+
+    dialog:SetScript("OnShow", function()
+        vertCB:SetChecked(PulseCheckDB.orientation == "vertical")
+        scaleSlider:SetValue(PulseCheckDB.scale)
+        for _, opt in ipairs(visOptions) do
+            visCB[opt.key]:SetChecked(PulseCheckDB.visibility[opt.key])
+        end
+        lustActiveCB:SetChecked(PulseCheckDB.sound.lustActive)
+        lustActivePicker.SetDisplayText(PulseCheckDB.sound.lustActiveSound)
+        lustReadyCB:SetChecked(PulseCheckDB.sound.lustReady)
+        lustReadyPicker.SetDisplayText(PulseCheckDB.sound.lustReadySound)
+        bresUsedCB:SetChecked(PulseCheckDB.sound.bresUsed)
+        bresUsedPicker.SetDisplayText(PulseCheckDB.sound.bresUsedSound)
     end)
 
     dialog:Hide()
@@ -972,17 +1004,18 @@ local function SetupEditMode()
 
     mainFrame:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
-        -- Normalize to TOPLEFT anchor for consistent positioning
-        local scale = self:GetScale()
-        local x = SnapToGrid(self:GetLeft() / scale)
-        local y = SnapToGrid((self:GetTop() - UIParent:GetTop()) / scale)
+        -- Snap the frame's center to the grid. SetPoint offsets are in
+        -- UIParent coords so GetCenter() values can be used directly.
+        local cx, cy = self:GetCenter()
+        local snappedCX = SnapToGrid(cx)
+        local snappedCY = SnapToGrid(cy)
         self:ClearAllPoints()
-        self:SetPoint("TOPLEFT", UIParent, "TOPLEFT", x, y)
+        self:SetPoint("CENTER", UIParent, "BOTTOMLEFT", snappedCX, snappedCY)
         PulseCheckDB.position = {
-            point = "TOPLEFT",
-            relativePoint = "TOPLEFT",
-            x = x,
-            y = y,
+            point = "CENTER",
+            relativePoint = "BOTTOMLEFT",
+            x = snappedCX,
+            y = snappedCY,
         }
         RepositionDialog()
     end)
@@ -1082,38 +1115,26 @@ local function BuildOptionsPanel()
     settingsPanel = CreateFrame("Frame")
     settingsPanel.name = "PulseCheck"
 
-    settingsPanel:SetScript("OnShow", function()
-        if mainFrame then mainFrame:Show() end
-    end)
-
     if SettingsPanel then
         SettingsPanel:HookScript("OnHide", function()
             RefreshVisibility()
         end)
     end
 
-    local scrollFrame = CreateFrame("ScrollFrame", nil, settingsPanel, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", 0, -2)
-    scrollFrame:SetPoint("BOTTOMRIGHT", -26, 2)
-
-    local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetSize(600, 510)
-    scrollFrame:SetScrollChild(content)
-
-    local title = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    local title = settingsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -16)
     title:SetText("PulseCheck")
 
-    local subtitle = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    local subtitle = settingsPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
     subtitle:SetText(L.ADDON_SUBTITLE)
 
-    local hint = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local hint = settingsPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     hint:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", 0, -4)
     hint:SetText(L.EDIT_MODE_HINT)
 
     -- Orientation
-    CreateCheckbox(content, L.VERTICAL_ORIENTATION, 16, -72,
+    local vertCB = CreateCheckbox(settingsPanel, L.VERTICAL_ORIENTATION, 16, -72,
         function() return PulseCheckDB.orientation == "vertical" end,
         function(val)
             PulseCheckDB.orientation = val and "vertical" or "horizontal"
@@ -1122,16 +1143,15 @@ local function BuildOptionsPanel()
     )
 
     -- Scale
-    CreateSlider(content, L.SCALE, 20, -110, 0.5, 2.0, 0.1,
+    local scaleSlider = CreateSlider(settingsPanel, L.SCALE, 20, -110, 0.5, 2.0, 0.1,
         function() return PulseCheckDB.scale end,
         function(val)
-            PulseCheckDB.scale = val
-            ApplyLayout()
+            SetScale(val)
         end
     )
 
     -- Visibility
-    local visHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local visHeader = settingsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     visHeader:SetPoint("TOPLEFT", 16, -160)
     visHeader:SetText(L.HEADER_VISIBILITY)
 
@@ -1147,10 +1167,11 @@ local function BuildOptionsPanel()
     local visRowH = 30
     local visCol1X = 16
     local visCol2X = 250
+    local visCB = {}
     for _, opt in ipairs(panelVisOptions) do
         local x = opt.col == 1 and visCol1X or visCol2X
         local y = visBaseY - (opt.row - 1) * visRowH
-        CreateCheckbox(content, opt.label, x, y,
+        visCB[opt.key] = CreateCheckbox(settingsPanel, opt.label, x, y,
             function() return PulseCheckDB.visibility[opt.key] end,
             function(val)
                 PulseCheckDB.visibility[opt.key] = val
@@ -1160,39 +1181,39 @@ local function BuildOptionsPanel()
     end
 
     -- Sounds header
-    local soundHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local soundHeader = settingsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     soundHeader:SetPoint("TOPLEFT", 16, -270)
     soundHeader:SetText(L.HEADER_SOUNDS)
 
-    CreateCheckbox(content, L.SOUND_LUST_ACTIVE, 16, -290,
+    local lustActiveCB = CreateCheckbox(settingsPanel, L.SOUND_LUST_ACTIVE, 16, -290,
         function() return PulseCheckDB.sound.lustActive end,
         function(val) PulseCheckDB.sound.lustActive = val end
     )
-    CreateSoundPicker(content, 34, -316,
+    local lustActivePicker = CreateSoundPicker(settingsPanel, 34, -316,
         function() return PulseCheckDB.sound.lustActiveSound end,
         function(val) PulseCheckDB.sound.lustActiveSound = val end
     )
 
-    CreateCheckbox(content, L.SOUND_LUST_READY, 16, -342,
+    local lustReadyCB = CreateCheckbox(settingsPanel, L.SOUND_LUST_READY, 16, -342,
         function() return PulseCheckDB.sound.lustReady end,
         function(val) PulseCheckDB.sound.lustReady = val end
     )
-    CreateSoundPicker(content, 34, -368,
+    local lustReadyPicker = CreateSoundPicker(settingsPanel, 34, -368,
         function() return PulseCheckDB.sound.lustReadySound end,
         function(val) PulseCheckDB.sound.lustReadySound = val end
     )
 
-    CreateCheckbox(content, L.SOUND_BRES_USED, 16, -394,
+    local bresUsedCB = CreateCheckbox(settingsPanel, L.SOUND_BRES_USED, 16, -394,
         function() return PulseCheckDB.sound.bresUsed end,
         function(val) PulseCheckDB.sound.bresUsed = val end
     )
-    CreateSoundPicker(content, 34, -420,
+    local bresUsedPicker = CreateSoundPicker(settingsPanel, 34, -420,
         function() return PulseCheckDB.sound.bresUsedSound end,
         function(val) PulseCheckDB.sound.bresUsedSound = val end
     )
 
     -- Reset button
-    local resetBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    local resetBtn = CreateFrame("Button", nil, settingsPanel, "UIPanelButtonTemplate")
     resetBtn:SetPoint("TOPLEFT", 16, -470)
     resetBtn:SetSize(120, 24)
     resetBtn:SetText(L.RESET_DEFAULTS)
@@ -1205,6 +1226,27 @@ local function BuildOptionsPanel()
         end
         print("|cff00ccffPulseCheck:|r " .. L.MSG_RESET)
     end)
+
+    settingsPanel:SetScript("OnShow", function()
+        if mainFrame then mainFrame:Show() end
+        vertCB:SetChecked(PulseCheckDB.orientation == "vertical")
+        scaleSlider:SetValue(PulseCheckDB.scale)
+        for _, opt in ipairs(panelVisOptions) do
+            visCB[opt.key]:SetChecked(PulseCheckDB.visibility[opt.key])
+        end
+        lustActiveCB:SetChecked(PulseCheckDB.sound.lustActive)
+        lustActivePicker.SetDisplayText(PulseCheckDB.sound.lustActiveSound)
+        lustReadyCB:SetChecked(PulseCheckDB.sound.lustReady)
+        lustReadyPicker.SetDisplayText(PulseCheckDB.sound.lustReadySound)
+        bresUsedCB:SetChecked(PulseCheckDB.sound.bresUsed)
+        bresUsedPicker.SetDisplayText(PulseCheckDB.sound.bresUsedSound)
+    end)
+
+    -- Version and locale info
+    local versionText = settingsPanel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    versionText:SetPoint("BOTTOMLEFT", 16, 16)
+    versionText:SetText(string.format(L.VERSION_LABEL,
+        C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version"), GetLocale()))
 
     settingsCategory = Settings.RegisterCanvasLayoutCategory(settingsPanel, "PulseCheck")
     Settings.RegisterAddOnCategory(settingsCategory)
@@ -1256,8 +1298,7 @@ local function HandleSlashCommand(msg)
     if cmd == "scale" then
         local val = tonumber(args[2])
         if val and val >= 0.5 and val <= 2.0 then
-            PulseCheckDB.scale = val
-            ApplyLayout()
+            SetScale(val)
             print("|cff00ccffPulseCheck:|r " .. string.format(L.MSG_SCALE, val))
         else
             print("|cff00ccffPulseCheck:|r " .. L.MSG_SCALE_USAGE)

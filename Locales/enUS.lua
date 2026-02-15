@@ -4,6 +4,7 @@ local L = PC_L
 -- Panel
 L.ADDON_SUBTITLE          = "Battle res and bloodlust cooldown tracking"
 L.EDIT_MODE_HINT          = "Position is configured in HUD Edit Mode (Esc > Edit Mode)"
+L.VERSION_LABEL           = "Version %s | Locale: %s"
 
 -- Section headers
 L.HEADER_VISIBILITY       = "Visibility"
