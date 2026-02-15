@@ -89,6 +89,7 @@ local frameUnlocked      = false
 local frameSelected      = false
 local settingsDialog     = nil
 local wasDragged         = false
+local soundPickerOpen    = false
 
 local SNAP_GRID_SIZE = 10  -- pixels; snap frame position on drag release
 
@@ -248,6 +249,7 @@ local function CreateSoundPicker(parent, x, y, getValue, setValue)
     arrow:SetTexture("Interface/ChatFrame/ChatFrameExpandArrow")
 
     btn:SetScript("OnClick", function(self)
+        soundPickerOpen = true
         MenuUtil.CreateContextMenu(self, function(_, rootDescription)
             rootDescription:SetScrollMode(400)
             local sounds = GetSoundList()
@@ -916,9 +918,10 @@ local function SetupEditMode()
     mainFrame:RegisterEvent("GLOBAL_MOUSE_DOWN")
     mainFrame:HookScript("OnEvent", function(self, event)
         if event == "GLOBAL_MOUSE_DOWN" and frameSelected then
-            if not mainFrame:IsMouseOver()
-               and not (settingsDialog and settingsDialog:IsMouseOver())
-               and not (Menu and Menu.GetOpenMenu and Menu.GetOpenMenu()) then
+            if soundPickerOpen then
+                soundPickerOpen = false
+            elseif not mainFrame:IsMouseOver()
+               and not (settingsDialog and settingsDialog:IsMouseOver()) then
                 SetFrameSelected(false)
             end
         end
