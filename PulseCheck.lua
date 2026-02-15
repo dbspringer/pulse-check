@@ -42,10 +42,11 @@ local BUILTIN_SOUNDS = {
 
 -- Preferred LSM sounds per alert, tried in order; first registered match wins.
 -- BigWigs registers its sounds with LSM; DBM does not.
+-- SharedMedia_Causese uses color-coded names (|cFFFF0000Name|r).
 local LSM_PREFERRED = {
-    lustActiveSound = { "BigWigs: Alert", "BigWigs: Alarm", "Bling", "Glass" },
-    lustReadySound  = { "BigWigs: Long", "BigWigs: Victory", "Chime", "Ping" },
-    bresUsedSound   = { "BigWigs: Info", "BigWigs: Beware", "Ding", "Knock" },
+    lustActiveSound = { "|cFFFF0000Bloodlust|r", "BigWigs: Alert", "BigWigs: Alarm" },
+    lustReadySound  = { "|cFFFF0000Ready|r", "BigWigs: Long", "BigWigs: Victory" },
+    bresUsedSound   = { "|cFFFF0000Charge|r", "BigWigs: Info", "BigWigs: Beware" },
 }
 
 local DEFAULTS = {
