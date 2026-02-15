@@ -1303,13 +1303,20 @@ local function OnEvent(self, event, ...)
             PulseCheckDB.showAlways = nil
         end
 
-        -- Apply preferred LSM sounds once if available
+        CreateUI()
+        SetupEditMode()
+        BuildOptionsPanel()
+
+        self:UnregisterEvent("ADDON_LOADED")
+
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        -- Apply preferred LSM sounds once if available (must run here,
+        -- not ADDON_LOADED, because LSM sounds aren't registered yet at load time)
         if not PulseCheckDB.lsmDefaultsApplied then
             local lsm = GetLSM()
             if lsm then
                 PulseCheckDB.lsmDefaultsApplied = true
                 for key, candidates in pairs(LSM_PREFERRED) do
-                    -- Only upgrade if user hasn't changed from built-in default
                     if PulseCheckDB.sound[key] == DEFAULTS.sound[key] then
                         for _, name in ipairs(candidates) do
                             if lsm:IsValid("sound", name) then
@@ -1322,13 +1329,6 @@ local function OnEvent(self, event, ...)
             end
         end
 
-        CreateUI()
-        SetupEditMode()
-        BuildOptionsPanel()
-
-        self:UnregisterEvent("ADDON_LOADED")
-
-    elseif event == "PLAYER_ENTERING_WORLD" then
         CheckSecretValues()
         if useAuraFallback then
             StartAuraFallbackTicker()
