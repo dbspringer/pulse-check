@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.0
+
+- Extract all user-facing strings into locale system (`Locales/enUS.lua`) for future translation support
+- Fix scale changes shifting icon position (CENTER anchor with offset adjustment)
+- Add version and locale info to settings panel
+- Remove unnecessary scroll frame from settings panel
+- Sync settings state between Edit Mode dialog and settings panel
+- Full-width reset button in Edit Mode dialog
+- Fix frame showing on reload when solo visibility is disabled
+- Fix scale slider label displaying "1" instead of "1.0"
+- Route all scale changes through centralized `SetScale()` function
+
 ## 1.0.0
 
 - Initial release

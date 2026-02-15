@@ -17,7 +17,7 @@ The cooldown icons must be moveable and configurable via WoW's built-in Edit Mod
 
 ## Architecture
 
-Single-file addon: `PulseCheck.lua`. No libraries, no XML, no embeds.
+Core logic in `PulseCheck.lua` with locale strings in `Locales/enUS.lua`. No libraries, no XML, no embeds.
 
 ### Constraints
 
@@ -57,9 +57,17 @@ Patch 12.0 introduced "secret values" that can restrict aura data on tainted exe
 | `C_Timer.After(delay, fn)` | Delayed execution for frame initialization |
 | `C_Timer.NewTicker(interval, fn)` | Polling loop |
 
+### Localization
+
+All user-facing strings live in `Locales/enUS.lua` as a global `PC_L` table, aliased to `local L = PC_L` in `PulseCheck.lua`. To add a language, create `Locales/<locale>.lua` that conditionally overrides keys (e.g. `if GetLocale() ~= "deDE" then return end`), and add it to the TOC after `enUS.lua`. Not localized (intentionally): addon name, slash commands, sound names, color codes, saved variable keys.
+
+### Frame Positioning
+
+The main frame uses a CENTER anchor relative to UIParent's BOTTOMLEFT. `SetPoint` offsets are in the child frame's coordinate space (`GetCenter()` returns offset values directly). Position is snapped to a 10-pixel grid on drag release. Scale changes preserve visual center via offset adjustment: `new_offset = old_offset * old_scale / new_scale`.
+
 ### Do
 
-- Keep the addon as a single `.lua` file unless there is a strong reason to split
+- Keep the addon to `PulseCheck.lua` + locale files unless there is a strong reason to add more
 - Use `C_Timer.After` for any timing-sensitive UI manipulation (Blizzard frames may not be ready on event fire)
 - Test that aura spell IDs still resolve after WoW patches — these are the most fragile parts
 - Update `## Interface:` in the TOC when targeting a new game build
@@ -80,6 +88,7 @@ Patch 12.0 introduced "secret values" that can restrict aura data on tainted exe
 |---|---|
 | `PulseCheck.toc` | Addon metadata, interface version, load order |
 | `PulseCheck.lua` | All addon logic |
+| `Locales/enUS.lua` | English locale strings (`PC_L` table) |
 | `bloodlust-detection-research.md` | API research notes and spell ID reference |
 | `CHANGELOG.md` | Version history |
 
