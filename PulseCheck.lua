@@ -269,6 +269,19 @@ local function CreateSoundPicker(parent, x, y, getValue, setValue)
             end
         end)
         if menu then
+            C_Timer.After(0, function()
+                if not menu:IsShown() then return end
+                menu:ClearAllPoints()
+                local btnScale = self:GetEffectiveScale()
+                local menuScale = menu:GetEffectiveScale()
+                local btnRightPx = self:GetRight() * btnScale
+                local menuWidthPx = menu:GetWidth() * menuScale
+                if btnRightPx + menuWidthPx > GetScreenWidth() then
+                    menu:SetPoint("RIGHT", self, "LEFT", -2, 0)
+                else
+                    menu:SetPoint("LEFT", self, "RIGHT", 2, 0)
+                end
+            end)
             soundPickerTimer = C_Timer.NewTicker(0.2, function()
                 if not menu:IsShown() then
                     soundPickerOpen = false
