@@ -263,9 +263,17 @@ local function CreateSoundPicker(parent, x, y, getValue, setValue)
     btn:SetScript("OnClick", function(self)
         soundPickerOpen = true
         if soundPickerTimer then soundPickerTimer:Cancel() end
+        local sounds = GetSoundList()
+        local selectedIndex = 1
+        local current = getValue()
+        for i, name in ipairs(sounds) do
+            if name == current then
+                selectedIndex = i
+                break
+            end
+        end
         local menu = MenuUtil.CreateContextMenu(self, function(_, rootDescription)
             rootDescription:SetScrollMode(400)
-            local sounds = GetSoundList()
             for _, name in ipairs(sounds) do
                 rootDescription:CreateRadio(
                     name,
@@ -279,6 +287,13 @@ local function CreateSoundPicker(parent, x, y, getValue, setValue)
             end
         end)
         if menu then
+            -- Scroll to center the selected item
+            local scrollBox = menu.ScrollBox
+            if scrollBox and #sounds > 0 then
+                local fraction = math.max(0, math.min(1,
+                    (selectedIndex - 1) / math.max(1, #sounds - 1)))
+                scrollBox:SetScrollPercentage(fraction)
+            end
             local menuWidth = menu:GetWidth()
             if menuWidth and menuWidth > 0 then
                 menu:ClearAllPoints()
