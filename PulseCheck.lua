@@ -90,6 +90,7 @@ local frameSelected      = false
 local settingsDialog     = nil
 local wasDragged         = false
 local soundPickerOpen    = false
+local soundPickerTimer   = nil
 
 local SNAP_GRID_SIZE = 10  -- pixels; snap frame position on drag release
 
@@ -920,11 +921,11 @@ local function SetupEditMode()
     mainFrame:HookScript("OnEvent", function(self, event)
         if event == "GLOBAL_MOUSE_DOWN" and frameSelected then
             if soundPickerOpen then
-                C_Timer.After(0, function()
-                    if not (Menu and Menu.GetOpenMenu and Menu.GetOpenMenu()) then
-                        soundPickerOpen = false
-                    end
-                end)
+                if soundPickerTimer then soundPickerTimer:Cancel() end
+                soundPickerTimer = C_Timer.NewTicker(0.5, function()
+                    soundPickerOpen = false
+                    soundPickerTimer = nil
+                end, 1)
             elseif not mainFrame:IsMouseOver()
                and not (settingsDialog and settingsDialog:IsMouseOver()) then
                 SetFrameSelected(false)
