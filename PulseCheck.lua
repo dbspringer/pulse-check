@@ -28,9 +28,17 @@ local ICON_GAP = 6
 local ICON_BRES = 136080
 local ICON_LUST = 136012
 
-local SOUND_LUST_ACTIVE = 8959   -- Raid warning
-local SOUND_LUST_READY  = 8960   -- Ready check
-local SOUND_BRES_USED   = 3175   -- Map ping
+local BUILTIN_SOUNDS = {
+    ["None"]            = false,
+    ["Alarm Clock"]     = 12867,
+    ["BNet Toast"]      = 18019,
+    ["LFG Role Check"]  = 17317,
+    ["Map Ping"]        = 3175,
+    ["PvP Queue"]       = 8459,
+    ["Raid Boss Emote"] = 12197,
+    ["Raid Warning"]    = 8959,
+    ["Ready Check"]     = 8960,
+}
 
 local DEFAULTS = {
     position    = nil,
@@ -45,9 +53,12 @@ local DEFAULTS = {
         solo           = false,
     },
     sound = {
-        lustActive = true,
-        lustReady  = true,
-        bresUsed   = false,
+        lustActive      = true,
+        lustActiveSound = "Raid Warning",
+        lustReady       = true,
+        lustReadySound  = "Ready Check",
+        bresUsed        = false,
+        bresUsedSound   = "Map Ping",
     },
 }
 
@@ -159,6 +170,127 @@ local function CreateSlider(parent, label, x, y, minVal, maxVal, step, getValue,
     return slider
 end
 
+local function GetLSM()
+    if LibStub then
+        return LibStub("LibSharedMedia-3.0", true)
+    end
+    return nil
+end
+
+local function GetSoundList()
+    local names = {}
+    for name in pairs(BUILTIN_SOUNDS) do
+        if name ~= "None" then
+            names[#names + 1] = name
+        end
+    end
+
+    local lsm = GetLSM()
+    if lsm then
+        local lsmSounds = lsm:List("sound")
+        for _, name in ipairs(lsmSounds) do
+            if not BUILTIN_SOUNDS[name] then
+                names[#names + 1] = name
+            end
+        end
+    end
+
+    table.sort(names)
+    table.insert(names, 1, "None")
+    return names
+end
+
+local function PlayAlertSound(soundName)
+    if not soundName or soundName == "None" then return end
+
+    local kitID = BUILTIN_SOUNDS[soundName]
+    if kitID then
+        PlaySound(kitID)
+        return
+    end
+
+    local lsm = GetLSM()
+    if lsm then
+        local path = lsm:Fetch("sound", soundName)
+        if path then
+            PlaySoundFile(path, "Master")
+        end
+    end
+end
+
+local function CreateSoundPicker(parent, x, y, getValue, setValue)
+    local container = CreateFrame("Frame", nil, parent)
+    container:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    container:SetSize(210, 22)
+
+    -- Dropdown button
+    local btn = CreateFrame("Button", nil, container, "BackdropTemplate")
+    btn:SetPoint("TOPLEFT")
+    btn:SetSize(180, 22)
+    btn:SetBackdrop({
+        bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        edgeSize = 10,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    btn:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
+    btn:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+
+    local label = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    label:SetPoint("LEFT", 8, 0)
+    label:SetPoint("RIGHT", -20, 0)
+    label:SetJustifyH("LEFT")
+    label:SetText(getValue())
+
+    local arrow = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    arrow:SetPoint("RIGHT", -6, 0)
+    arrow:SetText("\226\150\188")
+
+    btn:SetScript("OnClick", function(self)
+        MenuUtil.CreateContextMenu(self, function(_, rootDescription)
+            local sounds = GetSoundList()
+            for _, name in ipairs(sounds) do
+                rootDescription:CreateRadio(
+                    name,
+                    function() return getValue() == name end,
+                    function()
+                        setValue(name)
+                        label:SetText(name)
+                        PlayAlertSound(name)
+                    end
+                )
+            end
+        end)
+    end)
+
+    -- Preview button
+    local preview = CreateFrame("Button", nil, container, "BackdropTemplate")
+    preview:SetPoint("LEFT", btn, "RIGHT", 4, 0)
+    preview:SetSize(22, 22)
+    preview:SetBackdrop({
+        bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        edgeSize = 10,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    preview:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
+    preview:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+
+    local playIcon = preview:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    playIcon:SetPoint("CENTER")
+    playIcon:SetText("\226\150\182")
+
+    preview:SetScript("OnClick", function()
+        PlayAlertSound(getValue())
+    end)
+
+    function container.SetDisplayText(text)
+        label:SetText(text)
+    end
+
+    return container
+end
+
 -- ---------------------------------------------------------------------------
 -- Detection Functions
 -- ---------------------------------------------------------------------------
@@ -210,10 +342,10 @@ local function UpdateBloodlustState()
 
     -- Sound on state transitions
     if state.lustActive and not oldLustActive and PulseCheckDB.sound.lustActive then
-        PlaySound(SOUND_LUST_ACTIVE)
+        PlayAlertSound(PulseCheckDB.sound.lustActiveSound)
     end
     if oldSated and not state.sated and PulseCheckDB.sound.lustReady then
-        PlaySound(SOUND_LUST_READY)
+        PlayAlertSound(PulseCheckDB.sound.lustReadySound)
     end
 
     return (state.lustActive ~= oldLustActive) or (state.sated ~= oldSated)
@@ -238,7 +370,7 @@ local function UpdateBresState()
     end
 
     if oldCharges > 0 and state.bresCharges < oldCharges and PulseCheckDB.sound.bresUsed then
-        PlaySound(SOUND_BRES_USED)
+        PlayAlertSound(PulseCheckDB.sound.bresUsedSound)
     end
 
     return state.bresCharges ~= oldCharges
@@ -568,7 +700,7 @@ end
 
 local function CreateEditModeDialog()
     local dialog = CreateFrame("Frame", "PulseCheckEditDialog", UIParent, "BackdropTemplate")
-    dialog:SetSize(250, 435)
+    dialog:SetSize(250, 520)
     dialog:SetBackdrop({
         bgFile = "Interface/Tooltips/UI-Tooltip-Background",
         edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
@@ -642,20 +774,32 @@ local function CreateEditModeDialog()
         function() return PulseCheckDB.sound.lustActive end,
         function(val) PulseCheckDB.sound.lustActive = val end
     )
+    local lustActivePicker = CreateSoundPicker(dialog, 30, -332,
+        function() return PulseCheckDB.sound.lustActiveSound end,
+        function(val) PulseCheckDB.sound.lustActiveSound = val end
+    )
 
-    local lustReadyCB = CreateCheckbox(dialog, "Lust ready", 12, -332,
+    local lustReadyCB = CreateCheckbox(dialog, "Lust ready", 12, -358,
         function() return PulseCheckDB.sound.lustReady end,
         function(val) PulseCheckDB.sound.lustReady = val end
     )
+    local lustReadyPicker = CreateSoundPicker(dialog, 30, -384,
+        function() return PulseCheckDB.sound.lustReadySound end,
+        function(val) PulseCheckDB.sound.lustReadySound = val end
+    )
 
-    local bresUsedCB = CreateCheckbox(dialog, "Bres charge used", 12, -358,
+    local bresUsedCB = CreateCheckbox(dialog, "Bres charge used", 12, -410,
         function() return PulseCheckDB.sound.bresUsed end,
         function(val) PulseCheckDB.sound.bresUsed = val end
+    )
+    local bresUsedPicker = CreateSoundPicker(dialog, 30, -436,
+        function() return PulseCheckDB.sound.bresUsedSound end,
+        function(val) PulseCheckDB.sound.bresUsedSound = val end
     )
 
     -- Reset Defaults button
     local resetBtn = CreateFrame("Button", nil, dialog, "UIPanelButtonTemplate")
-    resetBtn:SetPoint("TOPLEFT", 12, -396)
+    resetBtn:SetPoint("TOPLEFT", 12, -478)
     resetBtn:SetSize(120, 24)
     resetBtn:SetText("Reset Defaults")
     resetBtn:SetScript("OnClick", function()
@@ -670,8 +814,11 @@ local function CreateEditModeDialog()
             visCB[opt.key]:SetChecked(PulseCheckDB.visibility[opt.key])
         end
         lustActiveCB:SetChecked(PulseCheckDB.sound.lustActive)
+        lustActivePicker.SetDisplayText(PulseCheckDB.sound.lustActiveSound)
         lustReadyCB:SetChecked(PulseCheckDB.sound.lustReady)
+        lustReadyPicker.SetDisplayText(PulseCheckDB.sound.lustReadySound)
         bresUsedCB:SetChecked(PulseCheckDB.sound.bresUsed)
+        bresUsedPicker.SetDisplayText(PulseCheckDB.sound.bresUsedSound)
         print("|cff00ccffPulseCheck:|r Settings reset to defaults.")
     end)
 
@@ -909,20 +1056,32 @@ local function BuildOptionsPanel()
         function() return PulseCheckDB.sound.lustActive end,
         function(val) PulseCheckDB.sound.lustActive = val end
     )
+    CreateSoundPicker(panel, 34, -426,
+        function() return PulseCheckDB.sound.lustActiveSound end,
+        function(val) PulseCheckDB.sound.lustActiveSound = val end
+    )
 
-    CreateCheckbox(panel, "Bloodlust ready (sated expired)", 16, -430,
+    CreateCheckbox(panel, "Bloodlust ready (sated expired)", 16, -452,
         function() return PulseCheckDB.sound.lustReady end,
         function(val) PulseCheckDB.sound.lustReady = val end
     )
+    CreateSoundPicker(panel, 34, -478,
+        function() return PulseCheckDB.sound.lustReadySound end,
+        function(val) PulseCheckDB.sound.lustReadySound = val end
+    )
 
-    CreateCheckbox(panel, "Battle res charge used", 16, -460,
+    CreateCheckbox(panel, "Battle res charge used", 16, -504,
         function() return PulseCheckDB.sound.bresUsed end,
         function(val) PulseCheckDB.sound.bresUsed = val end
+    )
+    CreateSoundPicker(panel, 34, -530,
+        function() return PulseCheckDB.sound.bresUsedSound end,
+        function(val) PulseCheckDB.sound.bresUsedSound = val end
     )
 
     -- Reset button
     local resetBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    resetBtn:SetPoint("TOPLEFT", 16, -510)
+    resetBtn:SetPoint("TOPLEFT", 16, -580)
     resetBtn:SetSize(120, 24)
     resetBtn:SetText("Reset Defaults")
     resetBtn:SetScript("OnClick", function()
