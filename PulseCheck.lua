@@ -247,6 +247,7 @@ local function CreateSoundPicker(parent, x, y, getValue, setValue)
     arrow:SetPoint("RIGHT", -6, 0)
     arrow:SetSize(12, 12)
     arrow:SetTexture("Interface/ChatFrame/ChatFrameExpandArrow")
+    arrow:SetRotation(-math.pi / 2)
 
     btn:SetScript("OnClick", function(self)
         soundPickerOpen = true
