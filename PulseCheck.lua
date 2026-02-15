@@ -91,6 +91,7 @@ local settingsDialog     = nil
 local wasDragged         = false
 local soundPickerOpen    = false
 local soundPickerTimer   = nil
+local dialogOnLeft       = false
 
 local SNAP_GRID_SIZE = 10  -- pixels; snap frame position on drag release
 
@@ -272,14 +273,18 @@ local function CreateSoundPicker(parent, x, y, getValue, setValue)
             local menuWidth = menu:GetWidth()
             if menuWidth and menuWidth > 0 then
                 menu:ClearAllPoints()
-                local btnScale = self:GetEffectiveScale()
-                local menuScale = menu:GetEffectiveScale()
-                local btnRightPx = self:GetRight() * btnScale
-                local menuWidthPx = menuWidth * menuScale
-                if btnRightPx + menuWidthPx > GetScreenWidth() then
+                if dialogOnLeft then
                     menu:SetPoint("RIGHT", self, "LEFT", -2, 0)
                 else
-                    menu:SetPoint("LEFT", self, "RIGHT", 2, 0)
+                    local btnScale = self:GetEffectiveScale()
+                    local menuScale = menu:GetEffectiveScale()
+                    local btnRightPx = self:GetRight() * btnScale
+                    local menuWidthPx = menuWidth * menuScale
+                    if btnRightPx + menuWidthPx > GetScreenWidth() then
+                        menu:SetPoint("RIGHT", self, "LEFT", -2, 0)
+                    else
+                        menu:SetPoint("LEFT", self, "RIGHT", 2, 0)
+                    end
                 end
             end
             soundPickerTimer = C_Timer.NewTicker(0.2, function()
@@ -722,10 +727,20 @@ local function RepositionDialog()
     if not settingsDialog or not settingsDialog:IsShown() then return end
     local scale = mainFrame:GetEffectiveScale()
     local uiScale = UIParent:GetEffectiveScale()
-    local right = mainFrame:GetRight() * scale / uiScale
     local top = mainFrame:GetTop() * scale / uiScale
+    local right = mainFrame:GetRight() * scale / uiScale
+    local left = mainFrame:GetLeft() * scale / uiScale
+    local dialogWidth = settingsDialog:GetWidth() * settingsDialog:GetEffectiveScale() / uiScale
+    local screenWidth = GetScreenWidth() * uiScale / uiScale
+
     settingsDialog:ClearAllPoints()
-    settingsDialog:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", right + 8, top)
+    if right + 8 + dialogWidth > screenWidth then
+        dialogOnLeft = true
+        settingsDialog:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", left - 8, top)
+    else
+        dialogOnLeft = false
+        settingsDialog:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", right + 8, top)
+    end
 end
 
 local function CreateEditModeDialog()
