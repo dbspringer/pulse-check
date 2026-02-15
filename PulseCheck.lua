@@ -1307,7 +1307,7 @@ local function OnEvent(self, event, ...)
         local name = ...
         if name ~= ADDON_NAME then return end
 
-        PulseCheckDB = CopyTable(DEFAULTS)  -- TEMP: force defaults for testing
+        PulseCheckDB = MergeDefaults(PulseCheckDB, DEFAULTS)
 
         -- Migrate from old showAlways boolean to visibility table
         if PulseCheckDB.showAlways ~= nil then
