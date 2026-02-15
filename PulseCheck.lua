@@ -252,6 +252,11 @@ local function CreateSoundPicker(parent, x, y, getValue, setValue)
 
     btn:SetScript("OnClick", function(self)
         soundPickerOpen = true
+        if soundPickerTimer then soundPickerTimer:Cancel() end
+        soundPickerTimer = C_Timer.NewTicker(5, function()
+            soundPickerOpen = false
+            soundPickerTimer = nil
+        end, 1)
         MenuUtil.CreateContextMenu(self, function(_, rootDescription)
             rootDescription:SetScrollMode(400)
             local sounds = GetSoundList()
@@ -263,6 +268,13 @@ local function CreateSoundPicker(parent, x, y, getValue, setValue)
                         setValue(name)
                         label:SetText(name)
                         PlayAlertSound(name)
+                        C_Timer.After(0.1, function()
+                            soundPickerOpen = false
+                            if soundPickerTimer then
+                                soundPickerTimer:Cancel()
+                                soundPickerTimer = nil
+                            end
+                        end)
                     end
                 )
             end
@@ -834,6 +846,7 @@ local function CreateEditModeDialog()
 end
 
 local function SetFrameSelected(selected)
+    if not selected and soundPickerOpen then return end
     frameSelected = selected
     if not mainFrame then return end
 
@@ -920,13 +933,7 @@ local function SetupEditMode()
     mainFrame:RegisterEvent("GLOBAL_MOUSE_DOWN")
     mainFrame:HookScript("OnEvent", function(self, event)
         if event == "GLOBAL_MOUSE_DOWN" and frameSelected then
-            if soundPickerOpen then
-                if soundPickerTimer then soundPickerTimer:Cancel() end
-                soundPickerTimer = C_Timer.NewTicker(0.5, function()
-                    soundPickerOpen = false
-                    soundPickerTimer = nil
-                end, 1)
-            elseif not mainFrame:IsMouseOver()
+            if not mainFrame:IsMouseOver()
                and not (settingsDialog and settingsDialog:IsMouseOver()) then
                 SetFrameSelected(false)
             end
