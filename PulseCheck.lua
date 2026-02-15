@@ -1005,16 +1005,24 @@ local function BuildOptionsPanel()
     local panel = CreateFrame("Frame")
     panel.name = "PulseCheck"
 
-    local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", 0, -2)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -26, 2)
+
+    local content = CreateFrame("Frame", nil, scrollFrame)
+    content:SetSize(scrollFrame:GetWidth() or 600, 620)
+    scrollFrame:SetScrollChild(content)
+
+    local title = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -16)
     title:SetText("PulseCheck")
 
-    local subtitle = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    local subtitle = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
     subtitle:SetText("Battle res and bloodlust cooldown tracking")
 
     -- Visibility
-    local visHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local visHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     visHeader:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", 0, -20)
     visHeader:SetText("Visibility")
 
@@ -1027,7 +1035,7 @@ local function BuildOptionsPanel()
         { key = "solo",           label = "Solo",                  y = -240 },
     }
     for _, opt in ipairs(panelVisOptions) do
-        CreateCheckbox(panel, opt.label, 16, opt.y,
+        CreateCheckbox(content, opt.label, 16, opt.y,
             function() return PulseCheckDB.visibility[opt.key] end,
             function(val)
                 PulseCheckDB.visibility[opt.key] = val
@@ -1037,7 +1045,7 @@ local function BuildOptionsPanel()
     end
 
     -- Orientation
-    CreateCheckbox(panel, "Vertical orientation", 16, -280,
+    CreateCheckbox(content, "Vertical orientation", 16, -280,
         function() return PulseCheckDB.orientation == "vertical" end,
         function(val)
             PulseCheckDB.orientation = val and "vertical" or "horizontal"
@@ -1046,7 +1054,7 @@ local function BuildOptionsPanel()
     )
 
     -- Scale
-    CreateSlider(panel, "Scale", 20, -330, 0.5, 2.0, 0.1,
+    CreateSlider(content, "Scale", 20, -330, 0.5, 2.0, 0.1,
         function() return PulseCheckDB.scale end,
         function(val)
             PulseCheckDB.scale = val
@@ -1055,39 +1063,39 @@ local function BuildOptionsPanel()
     )
 
     -- Sounds header
-    local soundHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local soundHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     soundHeader:SetPoint("TOPLEFT", 16, -380)
     soundHeader:SetText("Sounds")
 
-    CreateCheckbox(panel, "Bloodlust activated", 16, -400,
+    CreateCheckbox(content, "Bloodlust activated", 16, -400,
         function() return PulseCheckDB.sound.lustActive end,
         function(val) PulseCheckDB.sound.lustActive = val end
     )
-    CreateSoundPicker(panel, 34, -426,
+    CreateSoundPicker(content, 34, -426,
         function() return PulseCheckDB.sound.lustActiveSound end,
         function(val) PulseCheckDB.sound.lustActiveSound = val end
     )
 
-    CreateCheckbox(panel, "Bloodlust ready (sated expired)", 16, -452,
+    CreateCheckbox(content, "Bloodlust ready (sated expired)", 16, -452,
         function() return PulseCheckDB.sound.lustReady end,
         function(val) PulseCheckDB.sound.lustReady = val end
     )
-    CreateSoundPicker(panel, 34, -478,
+    CreateSoundPicker(content, 34, -478,
         function() return PulseCheckDB.sound.lustReadySound end,
         function(val) PulseCheckDB.sound.lustReadySound = val end
     )
 
-    CreateCheckbox(panel, "Battle res charge used", 16, -504,
+    CreateCheckbox(content, "Battle res charge used", 16, -504,
         function() return PulseCheckDB.sound.bresUsed end,
         function(val) PulseCheckDB.sound.bresUsed = val end
     )
-    CreateSoundPicker(panel, 34, -530,
+    CreateSoundPicker(content, 34, -530,
         function() return PulseCheckDB.sound.bresUsedSound end,
         function(val) PulseCheckDB.sound.bresUsedSound = val end
     )
 
     -- Reset button
-    local resetBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local resetBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
     resetBtn:SetPoint("TOPLEFT", 16, -580)
     resetBtn:SetSize(120, 24)
     resetBtn:SetText("Reset Defaults")
