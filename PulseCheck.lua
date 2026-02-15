@@ -212,7 +212,7 @@ local function GetSoundList()
     return names
 end
 
-local function PlayAlertSound(soundName)
+local function PlayAlertSound(soundName, fallbackKey)
     if not soundName or soundName == "None" then return end
 
     local kitID = BUILTIN_SOUNDS[soundName]
@@ -226,6 +226,16 @@ local function PlayAlertSound(soundName)
         local path = lsm:Fetch("sound", soundName)
         if path then
             PlaySoundFile(path, "Master")
+            return
+        end
+    end
+
+    -- LSM sound missing (addon removed?) — fall back to built-in default
+    if fallbackKey then
+        local defaultName = DEFAULTS.sound[fallbackKey]
+        local defaultID = defaultName and BUILTIN_SOUNDS[defaultName]
+        if defaultID then
+            PlaySound(defaultID)
         end
     end
 end
@@ -401,10 +411,10 @@ local function UpdateBloodlustState()
 
     -- Sound on state transitions
     if state.lustActive and not oldLustActive and PulseCheckDB.sound.lustActive then
-        PlayAlertSound(PulseCheckDB.sound.lustActiveSound)
+        PlayAlertSound(PulseCheckDB.sound.lustActiveSound, "lustActiveSound")
     end
     if oldSated and not state.sated and PulseCheckDB.sound.lustReady then
-        PlayAlertSound(PulseCheckDB.sound.lustReadySound)
+        PlayAlertSound(PulseCheckDB.sound.lustReadySound, "lustReadySound")
     end
 
     return (state.lustActive ~= oldLustActive) or (state.sated ~= oldSated)
@@ -429,7 +439,7 @@ local function UpdateBresState()
     end
 
     if oldCharges > 0 and state.bresCharges < oldCharges and PulseCheckDB.sound.bresUsed then
-        PlayAlertSound(PulseCheckDB.sound.bresUsedSound)
+        PlayAlertSound(PulseCheckDB.sound.bresUsedSound, "bresUsedSound")
     end
 
     return state.bresCharges ~= oldCharges
