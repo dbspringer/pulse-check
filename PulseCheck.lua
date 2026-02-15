@@ -917,7 +917,8 @@ local function SetupEditMode()
     mainFrame:HookScript("OnEvent", function(self, event)
         if event == "GLOBAL_MOUSE_DOWN" and frameSelected then
             if not mainFrame:IsMouseOver()
-               and not (settingsDialog and settingsDialog:IsMouseOver()) then
+               and not (settingsDialog and settingsDialog:IsMouseOver())
+               and not (Menu and Menu.GetOpenMenu and Menu.GetOpenMenu()) then
                 SetFrameSelected(false)
             end
         end
