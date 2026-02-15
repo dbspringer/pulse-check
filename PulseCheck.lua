@@ -54,11 +54,11 @@ local DEFAULTS = {
     },
     sound = {
         lustActive      = true,
-        lustActiveSound = "Raid Warning",
+        lustActiveSound = "Alarm Clock",
         lustReady       = true,
-        lustReadySound  = "Ready Check",
+        lustReadySound  = "LFG Role Check",
         bresUsed        = false,
-        bresUsedSound   = "Map Ping",
+        bresUsedSound   = "Raid Boss Emote",
     },
 }
 
