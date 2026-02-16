@@ -9,6 +9,7 @@
 ## SavedVariables: PulseCheckDB
 ## X-License: MIT
 ## X-Website: https://github.com/dbspringer/pulse-check
+## X-Curse-Project-ID: 1464211
 
 Locales/enUS.lua
 Locales/deDE.lua
