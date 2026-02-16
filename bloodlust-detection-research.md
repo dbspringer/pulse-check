@@ -64,7 +64,7 @@ This is the cleanest method and works perfectly outside tainted execution paths.
 
 ## Approach 2: Haste Delta Detection
 
-`GetHaste()` returns the player's total haste percentage and is **not** restricted by secret values. A 25% *multiplicative* increase (`currentHaste > lastHaste * 1.25`) strongly suggests bloodlust was applied. Since WoW haste stacks multiplicatively, the 30% lust buff always produces at least a 30% scaling factor — well above the 25% threshold. Single trinket procs (typically 15-20% multiplicative) cannot reach it alone. Only fires when `useAuraFallback` is true (aura API confirmed blocked by secret values).
+`GetHaste()` returns the player's total haste percentage and is **not** restricted by secret values. A 25% *multiplicative* increase (`currentHaste > lastHaste * 1.25`) strongly suggests bloodlust was applied. Since WoW haste stacks multiplicatively, the 30% lust buff always produces at least a 30% scaling factor — well above the 25% threshold. Single trinket procs (typically 15-20% multiplicative) cannot reach it alone. Fires unconditionally as a safety net — the multiplicative threshold is the protection against false positives, not a gate on when the API is blocked (combat taint can block the API even when secret values are not detected).
 
 ```lua
 local LUST_HASTE_MULTIPLIER = 1.25
@@ -72,7 +72,7 @@ local LUST_ASSUMED_DURATION = 40
 local lastHaste = 0
 local lustHasteExpiration = 0
 
--- Called on a 1s poll ticker (only when useAuraFallback is true):
+-- Called on a 1s poll ticker:
 local currentHaste = GetHaste()
 if not state.lustActive then
     if lustHasteExpiration > 0 and GetTime() < lustHasteExpiration then
@@ -80,9 +80,9 @@ if not state.lustActive then
         state.lustActive = true
         state.lustExpiration = lustHasteExpiration
         state.lustDuration = LUST_ASSUMED_DURATION
-    elseif useAuraFallback and lastHaste > 0
+    elseif lastHaste > 0
            and currentHaste > lastHaste * LUST_HASTE_MULTIPLIER then
-        -- Large haste spike while aura API blocked — infer lust
+        -- Large haste spike — infer lust activation
         lustHasteExpiration = GetTime() + LUST_ASSUMED_DURATION
         state.lustActive = true
         state.lustExpiration = lustHasteExpiration

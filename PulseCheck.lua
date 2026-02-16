@@ -421,9 +421,9 @@ local function UpdateBloodlustState()
             state.lustActive = true
             state.lustExpiration = lustHasteExpiration
             state.lustDuration = LUST_ASSUMED_DURATION
-        elseif useAuraFallback and lastHaste > 0
+        elseif lastHaste > 0
                and currentHaste > lastHaste * LUST_HASTE_MULTIPLIER then
-            -- Large haste spike while aura API is blocked — infer lust
+            -- Large haste spike — infer lust activation
             lustHasteExpiration = GetTime() + LUST_ASSUMED_DURATION
             state.lustActive = true
             state.lustExpiration = lustHasteExpiration
