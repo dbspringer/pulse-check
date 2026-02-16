@@ -27,7 +27,7 @@ TEMP_DIR=$(mktemp -d)
 mkdir -p "$TEMP_DIR/$ADDON_NAME/Locales"
 cp "$SCRIPT_DIR/$ADDON_NAME.lua" "$TEMP_DIR/$ADDON_NAME/"
 cp "$SCRIPT_DIR/$ADDON_NAME.toc" "$TEMP_DIR/$ADDON_NAME/"
-cp "$SCRIPT_DIR/Locales/enUS.lua" "$TEMP_DIR/$ADDON_NAME/Locales/"
+cp "$SCRIPT_DIR"/Locales/*.lua "$TEMP_DIR/$ADDON_NAME/Locales/"
 cp "$SCRIPT_DIR/LICENSE" "$TEMP_DIR/$ADDON_NAME/"
 
 # Create zip file
