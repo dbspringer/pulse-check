@@ -6,4 +6,9 @@
 ## SavedVariables: PulseCheckDB
 
 Locales/enUS.lua
+Locales/deDE.lua
+Locales/esES.lua
+Locales/frFR.lua
+Locales/itIT.lua
+Locales/ptBR.lua
 PulseCheck.lua
