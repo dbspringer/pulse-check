@@ -1,6 +1,6 @@
 ## Interface: 120001
 ## Title: PulseCheck
-## Notes: Battle res and bloodlust cooldown tracking
+## Notes: Battle rez and bloodlust cooldown tracking
 ## Author: KidMoxie
 ## Version: 1.0.0
 ## IconTexture: Interface\Icons\Spell_Nature_Bloodlust
