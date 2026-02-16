@@ -4,7 +4,7 @@
 ## Author: KidMoxie
 ## Version: 1.0.0
 ## IconTexture: Interface\Icons\Spell_Nature_Bloodlust
-## Category: Buffs & Debuffs
+## Category: Combat
 ## DefaultState: enabled
 ## SavedVariables: PulseCheckDB
 ## X-License: MIT
