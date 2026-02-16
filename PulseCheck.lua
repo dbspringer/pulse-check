@@ -10,6 +10,12 @@ local L = PC_L
 -- ---------------------------------------------------------------------------
 
 local BRES_SPELL_ID = 20484
+local BRES_CLASS_SPELLS = {
+    20484,   -- Rebirth (Druid)
+    61999,   -- Raise Ally (Death Knight)
+    20707,   -- Soulstone (Warlock)
+    391054,  -- Intercession (Paladin)
+}
 
 local BLOODLUST_IDS = {
     2825, 32182, 80353, 90355, 178207, 230935, 256740, 160452,
@@ -23,6 +29,9 @@ local SATED_LOOKUP = {}
 for _, id in ipairs(SATED_IDS) do
     SATED_LOOKUP[id] = true
 end
+
+local LUST_HASTE_THRESHOLD = 25  -- % haste jump to infer bloodlust activation
+local LUST_ASSUMED_DURATION = 40
 
 local ICON_SIZE = 48
 local ICON_GAP = 6
@@ -92,6 +101,9 @@ local state = {
 }
 
 local auraFallbackTicker = nil
+local lustPollTicker     = nil
+local lastHaste          = 0
+local lustHasteExpiration = 0
 local bresPollTicker     = nil
 local raidSatedTicker    = nil
 local useAuraFallback    = false
@@ -124,6 +136,13 @@ local function MergeDefaults(saved, defaults)
         end
     end
     return saved
+end
+
+local function IsInInstancedContent()
+    local _, instanceType = GetInstanceInfo()
+    return instanceType == "party" or instanceType == "raid"
+        or instanceType == "scenario" or instanceType == "pvp"
+        or instanceType == "arena"
 end
 
 local function ShouldShow()
@@ -369,6 +388,8 @@ end
 
 local function UpdateBloodlustState()
     local oldLustActive = state.lustActive
+    local oldLustExpiration = state.lustExpiration
+    local oldLustDuration = state.lustDuration
     local oldSated = state.sated
     local oldSatedExpiration = state.satedExpiration
     local oldSatedDuration = state.satedDuration
@@ -382,10 +403,37 @@ local function UpdateBloodlustState()
         if aura then
             state.lustActive = true
             state.lustExpiration = aura.expirationTime
-            state.lustDuration = aura.duration or 40
+            state.lustDuration = aura.duration or LUST_ASSUMED_DURATION
             break
         end
     end
+
+    -- Fallback: if aura API is blocked, use haste delta to detect lust
+    local currentHaste = GetHaste()
+    if not state.lustActive then
+        if oldLustActive and oldLustExpiration > 0 and GetTime() < oldLustExpiration then
+            -- Lust was active and hasn't expired; API is unreliable
+            state.lustActive = true
+            state.lustExpiration = oldLustExpiration
+            state.lustDuration = oldLustDuration
+        elseif lustHasteExpiration > 0 and GetTime() < lustHasteExpiration then
+            -- Previously inferred via haste, still within expected duration
+            state.lustActive = true
+            state.lustExpiration = lustHasteExpiration
+            state.lustDuration = LUST_ASSUMED_DURATION
+        elseif lastHaste > 0
+               and (currentHaste - lastHaste) >= LUST_HASTE_THRESHOLD then
+            -- Large haste spike — infer lust activation
+            lustHasteExpiration = GetTime() + LUST_ASSUMED_DURATION
+            state.lustActive = true
+            state.lustExpiration = lustHasteExpiration
+            state.lustDuration = LUST_ASSUMED_DURATION
+        end
+    else
+        -- Aura API confirmed lust; clear haste inference
+        lustHasteExpiration = 0
+    end
+    lastHaste = currentHaste
 
     state.sated = false
     state.satedExpiration = 0
@@ -401,15 +449,14 @@ local function UpdateBloodlustState()
         end
     end
 
-    -- In combat, aura API may return nil due to secret values / taint.
-    -- Validate against the known expiration time before trusting the transition.
-    if oldSated and not state.sated and InCombatLockdown() then
-        if oldSatedExpiration > 0 and GetTime() < oldSatedExpiration then
-            -- Debuff hasn't actually expired yet; aura API is unreliable
-            state.sated = true
-            state.satedExpiration = oldSatedExpiration
-            state.satedDuration = oldSatedDuration
-        end
+    -- Aura API may return nil during combat (secret values / taint) or zone
+    -- transitions.  Validate against the known expiration time before trusting
+    -- a sated→false transition.
+    if oldSated and not state.sated
+       and oldSatedExpiration > 0 and GetTime() < oldSatedExpiration then
+        state.sated = true
+        state.satedExpiration = oldSatedExpiration
+        state.satedDuration = oldSatedDuration
     end
 
     -- Sound on state transitions
@@ -428,17 +475,35 @@ local function UpdateBresState()
 
     local chargeInfo = C_Spell.GetSpellCharges(BRES_SPELL_ID)
     if chargeInfo then
+        -- Encounter charge system active
         state.bresActive = true
         state.bresCharges = chargeInfo.currentCharges
         state.bresMaxCharges = chargeInfo.maxCharges
         state.bresCooldownStart = chargeInfo.cooldownStartTime
         state.bresCooldownDuration = chargeInfo.cooldownDuration
     else
+        -- No encounter charges; check personal brez cooldown
         state.bresActive = false
         state.bresCharges = 0
         state.bresMaxCharges = 0
         state.bresCooldownStart = 0
         state.bresCooldownDuration = 0
+
+        for _, id in ipairs(BRES_CLASS_SPELLS) do
+            if IsPlayerSpell(id) then
+                state.bresActive = true
+                state.bresMaxCharges = 1
+                local cooldownInfo = C_Spell.GetSpellCooldown(id)
+                if cooldownInfo and cooldownInfo.duration > 0 then
+                    state.bresCharges = 0
+                    state.bresCooldownStart = cooldownInfo.startTime
+                    state.bresCooldownDuration = cooldownInfo.duration
+                else
+                    state.bresCharges = 1
+                end
+                break
+            end
+        end
     end
 
     if oldCharges > 0 and state.bresCharges < oldCharges and PulseCheckDB.sound.bresUsed then
@@ -683,6 +748,10 @@ end
 local function RefreshBresIcon()
     if not bresIcon then return end
 
+    if ActionButton_HideOverlayGlow then
+        ActionButton_HideOverlayGlow(bresIcon)
+    end
+
     if not state.bresActive then
         bresIcon.icon:SetDesaturated(true)
         bresIcon.chargeText:SetText("")
@@ -694,6 +763,10 @@ local function RefreshBresIcon()
 
     bresIcon.icon:SetDesaturated(false)
     bresIcon.chargeText:SetText(state.bresCharges)
+
+    if state.bresCharges > 0 and ActionButton_ShowOverlayGlow then
+        ActionButton_ShowOverlayGlow(bresIcon)
+    end
 
     if state.bresCooldownDuration > 0 and state.bresCooldownStart > 0 then
         bresIcon.cooldown:SetCooldown(state.bresCooldownStart, state.bresCooldownDuration)
@@ -1074,6 +1147,22 @@ local function StopAuraFallbackTicker()
     end
 end
 
+local function StartLustPollTicker()
+    if lustPollTicker then return end
+    lustPollTicker = C_Timer.NewTicker(1, function()
+        if UpdateBloodlustState() then
+            RefreshLustIcon()
+        end
+    end)
+end
+
+local function StopLustPollTicker()
+    if lustPollTicker then
+        lustPollTicker:Cancel()
+        lustPollTicker = nil
+    end
+end
+
 local function StartBresPollTicker()
     if bresPollTicker then return end
     bresPollTicker = C_Timer.NewTicker(0.5, function()
@@ -1104,6 +1193,21 @@ local function StopRaidSatedTicker()
     if raidSatedTicker then
         raidSatedTicker:Cancel()
         raidSatedTicker = nil
+    end
+end
+
+local function UpdateInstancePolling()
+    if IsInInstancedContent() then
+        StartLustPollTicker()
+        StartBresPollTicker()
+        StartRaidSatedTicker()
+    else
+        StopLustPollTicker()
+        StopBresPollTicker()
+        StopRaidSatedTicker()
+        state.raidSated = false
+        UpdateBresState()
+        RefreshBresIcon()
     end
 end
 
@@ -1428,6 +1532,7 @@ local function OnEvent(self, event, ...)
         if useAuraFallback then
             StartAuraFallbackTicker()
         end
+        UpdateInstancePolling()
         RefreshAll()
 
     elseif event == "UNIT_AURA" then
@@ -1443,38 +1548,14 @@ local function OnEvent(self, event, ...)
         UpdateBresState()
         RefreshBresIcon()
 
-    elseif event == "ENCOUNTER_START" then
-        StartBresPollTicker()
-        StartRaidSatedTicker()
-        UpdateBloodlustState()
-        RefreshLustIcon()
-        UpdateBresState()
-        RefreshBresIcon()
+    elseif event == "ENCOUNTER_START" or event == "CHALLENGE_MODE_START" then
+        RefreshAll()
 
-    elseif event == "ENCOUNTER_END" then
-        StopBresPollTicker()
-        StopRaidSatedTicker()
-        state.raidSated = false
-        UpdateBloodlustState()
-        RefreshLustIcon()
-
-    elseif event == "CHALLENGE_MODE_START" then
-        StartBresPollTicker()
-        StartRaidSatedTicker()
-        UpdateBloodlustState()
-        RefreshLustIcon()
-        UpdateBresState()
-        RefreshBresIcon()
-
-    elseif event == "CHALLENGE_MODE_COMPLETED" then
-        StopBresPollTicker()
-        StopRaidSatedTicker()
-        state.raidSated = false
-        RefreshLustIcon()
-        UpdateBresState()
-        RefreshBresIcon()
+    elseif event == "ENCOUNTER_END" or event == "CHALLENGE_MODE_COMPLETED" then
+        RefreshAll()
 
     elseif event == "GROUP_ROSTER_UPDATE" or event == "ZONE_CHANGED_NEW_AREA" then
+        UpdateInstancePolling()
         RefreshVisibility()
         UpdateBresState()
         RefreshBresIcon()
