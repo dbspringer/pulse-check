@@ -33,7 +33,7 @@ See `bloodlust-detection-research.md` for the full spell ID tables and API resea
 
 - **Bloodlust buffs**: 20 spell IDs covering Bloodlust, Heroism, Time Warp, Primal Rage, Fury of the Aspects, all drum variants, and Harrier's Cry
 - **Sated debuffs**: 57723, 57724, 80354, 264689, 390435
-- **Battle Res**: spell 20484, tracked via `Cooldown Progress (Spell)` on charges
+- **Battle Res**: encounter charges via `C_Spell.GetSpellCharges(20484)`, with personal brez fallback for Druid (20484), DK (61999), Warlock (20707), Paladin (391054) via `C_Spell.GetSpellCooldown`
 
 ### 12.0 (Midnight) Aura API Considerations
 
@@ -41,7 +41,9 @@ Patch 12.0 introduced "secret values" that can restrict aura data on tainted exe
 
 - `C_Secrets.ShouldSpellAuraBeSecret(id)` to check if an aura is restricted at runtime
 - Lightweight polling via `C_Timer.NewTicker` instead of `UNIT_AURA` event registration if taint is a concern
-- **Time-based expiration validation** for sated debuff: when aura API returns nil during combat (due to taint), compare `GetTime()` against the previously saved `satedExpiration` to distinguish real expiration from API failure
+- **Haste-delta fallback** for bloodlust: when the aura API is blocked, a >25% multiplicative haste spike (`currentHaste > lastHaste * 1.25`) infers lust activation with an assumed 40s duration
+- **Time-based expiration validation** for both lust and sated: when aura API returns nil during combat (due to taint), compare `GetTime()` against the previously saved expiration to distinguish real expiration from API failure
+- **Instance-based polling**: `C_Timer.NewTicker` loops for lust (1s), bres (0.5s), and raid-sated (3s) start automatically inside instanced content and stop outside it
 
 **Important:** `COMBAT_LOG_EVENT_UNFILTERED` is a **protected event** in 12.0 — addons cannot register for it without triggering `ADDON_ACTION_FORBIDDEN`. Do not use CLEU as a fallback detection path.
 
@@ -50,12 +52,14 @@ Patch 12.0 introduced "secret values" that can restrict aura data on tainted exe
 | API | Purpose |
 |---|---|
 | `C_UnitAuras.GetPlayerAuraBySpellID(id)` | Check for a specific aura by spell ID |
+| `C_Spell.GetSpellCharges(id)` | Encounter brez charge info (charges, cooldown, max) |
+| `C_Spell.GetSpellCooldown(id)` | Personal spell cooldown info (for brez fallback) |
+| `IsPlayerSpell(id)` | Check if player knows a spell (brez class detection) |
 | `GetHaste()` | Player's current haste % (unrestricted by secret values) |
 | `C_Secrets.ShouldSpellAuraBeSecret(id)` | Check if aura data is protected (12.0+) |
-| `InCombatLockdown()` | Check if player is in combat (tainted execution path) |
-| `GetInstanceInfo()` | Returns instance type for visibility decisions |
+| `GetInstanceInfo()` | Returns instance type for visibility and polling decisions |
 | `C_Timer.After(delay, fn)` | Delayed execution for frame initialization |
-| `C_Timer.NewTicker(interval, fn)` | Polling loop |
+| `C_Timer.NewTicker(interval, fn)` | Polling loops (lust, bres, raid-sated, aura fallback) |
 
 ### Localization
 
