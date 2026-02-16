@@ -3,7 +3,12 @@
 ## Notes: Battle res and bloodlust cooldown tracking
 ## Author: KidMoxie
 ## Version: 1.0.0
+## IconTexture: Interface\Icons\Spell_Nature_Bloodlust
+## Category: Buffs & Debuffs
+## DefaultState: enabled
 ## SavedVariables: PulseCheckDB
+## X-License: MIT
+## X-Website: https://github.com/dbspringer/pulse-check
 
 Locales/enUS.lua
 Locales/deDE.lua
