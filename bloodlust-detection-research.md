@@ -64,15 +64,15 @@ This is the cleanest method and works perfectly outside tainted execution paths.
 
 ## Approach 2: Haste Delta Detection
 
-`GetHaste()` returns the player's total haste percentage and is **not** restricted by secret values. A sudden ≥25% jump strongly suggests bloodlust was applied. Haste is multiplicative in WoW, so the actual delta from a 30% lust buff is always ≥30% of your base — a 25% threshold is conservative and avoids false positives from trinket procs.
+`GetHaste()` returns the player's total haste percentage and is **not** restricted by secret values. A 25% *multiplicative* increase (`currentHaste > lastHaste * 1.25`) strongly suggests bloodlust was applied. Since WoW haste stacks multiplicatively, the 30% lust buff always produces at least a 30% scaling factor — well above the 25% threshold. Single trinket procs (typically 15-20% multiplicative) cannot reach it alone. Only fires when `useAuraFallback` is true (aura API confirmed blocked by secret values).
 
 ```lua
-local LUST_HASTE_THRESHOLD = 25
+local LUST_HASTE_MULTIPLIER = 1.25
 local LUST_ASSUMED_DURATION = 40
 local lastHaste = 0
 local lustHasteExpiration = 0
 
--- Called on a 1s poll ticker:
+-- Called on a 1s poll ticker (only when useAuraFallback is true):
 local currentHaste = GetHaste()
 if not state.lustActive then
     if lustHasteExpiration > 0 and GetTime() < lustHasteExpiration then
@@ -80,9 +80,9 @@ if not state.lustActive then
         state.lustActive = true
         state.lustExpiration = lustHasteExpiration
         state.lustDuration = LUST_ASSUMED_DURATION
-    elseif lastHaste > 0
-           and (currentHaste - lastHaste) >= LUST_HASTE_THRESHOLD then
-        -- Large haste spike — infer lust activation
+    elseif useAuraFallback and lastHaste > 0
+           and currentHaste > lastHaste * LUST_HASTE_MULTIPLIER then
+        -- Large haste spike while aura API blocked — infer lust
         lustHasteExpiration = GetTime() + LUST_ASSUMED_DURATION
         state.lustActive = true
         state.lustExpiration = lustHasteExpiration
@@ -136,9 +136,7 @@ end
 
 **Pros:** No protected event registration, no heuristics, deterministic. Covers both combat taint and zone transitions.
 
-**Cons:** If a buff is dispelled early, the addon won't detect the removal until the original timer expires or the aura API starts returning data again.
-
-**Cons:** If the debuff is dispelled early during combat, the addon won't detect the removal until the original timer expires or combat ends.
+**Cons:** If a lust buff is removed early (e.g., Soothe), the addon won't detect the removal until the original timer expires or the aura API starts returning data again. Sated debuffs cannot be dispelled and persist through death — only encounter reset clears them — so the time-based override is safe for sated.
 
 ### Checking if auras are restricted
 

@@ -30,7 +30,7 @@ for _, id in ipairs(SATED_IDS) do
     SATED_LOOKUP[id] = true
 end
 
-local LUST_HASTE_THRESHOLD = 25  -- % haste jump to infer bloodlust activation
+local LUST_HASTE_MULTIPLIER = 1.25  -- 25% multiplicative haste increase to infer lust
 local LUST_ASSUMED_DURATION = 40
 
 local ICON_SIZE = 48
@@ -421,9 +421,9 @@ local function UpdateBloodlustState()
             state.lustActive = true
             state.lustExpiration = lustHasteExpiration
             state.lustDuration = LUST_ASSUMED_DURATION
-        elseif lastHaste > 0
-               and (currentHaste - lastHaste) >= LUST_HASTE_THRESHOLD then
-            -- Large haste spike — infer lust activation
+        elseif useAuraFallback and lastHaste > 0
+               and currentHaste > lastHaste * LUST_HASTE_MULTIPLIER then
+            -- Large haste spike while aura API is blocked — infer lust
             lustHasteExpiration = GetTime() + LUST_ASSUMED_DURATION
             state.lustActive = true
             state.lustExpiration = lustHasteExpiration
@@ -498,7 +498,7 @@ local function UpdateBresState()
                     state.bresCharges = 0
                     state.bresCooldownStart = cooldownInfo.startTime
                     state.bresCooldownDuration = cooldownInfo.duration
-                else
+                elseif cooldownInfo then
                     state.bresCharges = 1
                 end
                 break
@@ -1206,6 +1206,8 @@ local function UpdateInstancePolling()
         StopBresPollTicker()
         StopRaidSatedTicker()
         state.raidSated = false
+        lastHaste = 0
+        lustHasteExpiration = 0
         UpdateBresState()
         RefreshBresIcon()
     end
@@ -1552,6 +1554,7 @@ local function OnEvent(self, event, ...)
         RefreshAll()
 
     elseif event == "ENCOUNTER_END" or event == "CHALLENGE_MODE_COMPLETED" then
+        state.raidSated = false
         RefreshAll()
 
     elseif event == "GROUP_ROSTER_UPDATE" or event == "ZONE_CHANGED_NEW_AREA" then
