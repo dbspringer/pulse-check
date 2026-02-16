@@ -1,3 +1,4 @@
+-- Auto-translated — pull requests with improved translations are welcome!
 if GetLocale() ~= "itIT" then return end
 local L = PC_L
 
