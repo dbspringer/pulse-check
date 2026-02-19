@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0
+
+- Fix false bloodlust alerts from temporary haste buffs and debuff recovery (e.g. Cinderbrew Meadery)
+- Add peak haste tracking to prevent debuff-to-normal haste swings from triggering lust detection
+- Add minimum absolute haste delta (20%) for haste-based lust inference
+- Fix battle res charge flickering from 1 to 0 on GCD when solo
+- Infer sated debuff when lust ends and aura API is blocked during combat
+
 ## 1.0.0
 
 - Battle resurrection charge tracking with cooldown timer

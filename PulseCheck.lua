@@ -30,7 +30,9 @@ for _, id in ipairs(SATED_IDS) do
     SATED_LOOKUP[id] = true
 end
 
+local BRES_GCD_THRESHOLD    = 2     -- ignore cooldowns at or below GCD length
 local LUST_HASTE_MULTIPLIER = 1.25  -- 25% multiplicative haste increase to infer lust
+local LUST_HASTE_MIN_DELTA  = 20    -- minimum absolute haste increase to infer lust
 local LUST_ASSUMED_DURATION = 40
 
 local ICON_SIZE = 48
@@ -103,6 +105,7 @@ local state = {
 local auraFallbackTicker = nil
 local lustPollTicker     = nil
 local lastHaste          = 0
+local peakHaste          = 0
 local lustHasteExpiration = 0
 local bresPollTicker     = nil
 local raidSatedTicker    = nil
@@ -422,8 +425,10 @@ local function UpdateBloodlustState()
             state.lustExpiration = lustHasteExpiration
             state.lustDuration = LUST_ASSUMED_DURATION
         elseif lastHaste > 0
-               and currentHaste > lastHaste * LUST_HASTE_MULTIPLIER then
-            -- Large haste spike — infer lust activation
+               and currentHaste > peakHaste
+               and currentHaste > lastHaste * LUST_HASTE_MULTIPLIER
+               and (currentHaste - lastHaste) >= LUST_HASTE_MIN_DELTA then
+            -- Large upward haste spike — infer lust activation
             lustHasteExpiration = GetTime() + LUST_ASSUMED_DURATION
             state.lustActive = true
             state.lustExpiration = lustHasteExpiration
@@ -434,6 +439,12 @@ local function UpdateBloodlustState()
         lustHasteExpiration = 0
     end
     lastHaste = currentHaste
+    if oldLustActive and not state.lustActive then
+        -- Lust just ended; reset peak so next lust can be detected
+        peakHaste = currentHaste
+    elseif currentHaste > peakHaste then
+        peakHaste = currentHaste
+    end
 
     state.sated = false
     state.satedExpiration = 0
@@ -457,6 +468,19 @@ local function UpdateBloodlustState()
         state.sated = true
         state.satedExpiration = oldSatedExpiration
         state.satedDuration = oldSatedDuration
+    end
+
+    -- Sated fallback: if lust just ended and API can't confirm sated, infer it.
+    -- Sated (10 min) starts when lust starts, so expiration = lustStart + 600.
+    if oldLustActive and not state.lustActive and not state.sated
+       and oldLustExpiration > 0 then
+        local lustStart = oldLustExpiration - (oldLustDuration > 0 and oldLustDuration or LUST_ASSUMED_DURATION)
+        local satedExpiration = lustStart + 600
+        if GetTime() < satedExpiration then
+            state.sated = true
+            state.satedExpiration = satedExpiration
+            state.satedDuration = 600
+        end
     end
 
     -- Sound on state transitions
@@ -494,7 +518,7 @@ local function UpdateBresState()
                 state.bresActive = true
                 state.bresMaxCharges = 1
                 local cooldownInfo = C_Spell.GetSpellCooldown(id)
-                if cooldownInfo and cooldownInfo.duration > 0 then
+                if cooldownInfo and cooldownInfo.duration > BRES_GCD_THRESHOLD then
                     state.bresCharges = 0
                     state.bresCooldownStart = cooldownInfo.startTime
                     state.bresCooldownDuration = cooldownInfo.duration
@@ -1207,6 +1231,7 @@ local function UpdateInstancePolling()
         StopRaidSatedTicker()
         state.raidSated = false
         lastHaste = 0
+        peakHaste = 0
         lustHasteExpiration = 0
         UpdateBresState()
         RefreshBresIcon()
