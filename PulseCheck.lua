@@ -470,6 +470,19 @@ local function UpdateBloodlustState()
         state.satedDuration = oldSatedDuration
     end
 
+    -- Sated fallback: if lust just ended and API can't confirm sated, infer it.
+    -- Sated (10 min) starts when lust starts, so expiration = lustStart + 600.
+    if oldLustActive and not state.lustActive and not state.sated
+       and oldLustExpiration > 0 then
+        local lustStart = oldLustExpiration - (oldLustDuration > 0 and oldLustDuration or LUST_ASSUMED_DURATION)
+        local satedExpiration = lustStart + 600
+        if GetTime() < satedExpiration then
+            state.sated = true
+            state.satedExpiration = satedExpiration
+            state.satedDuration = 600
+        end
+    end
+
     -- Sound on state transitions
     if state.lustActive and not oldLustActive and PulseCheckDB.sound.lustActive then
         PlayAlertSound(PulseCheckDB.sound.lustActiveSound, "lustActiveSound")
