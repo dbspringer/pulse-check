@@ -30,7 +30,9 @@ for _, id in ipairs(SATED_IDS) do
     SATED_LOOKUP[id] = true
 end
 
+local BRES_GCD_THRESHOLD    = 2     -- ignore cooldowns at or below GCD length
 local LUST_HASTE_MULTIPLIER = 1.25  -- 25% multiplicative haste increase to infer lust
+local LUST_HASTE_MIN_DELTA  = 20    -- minimum absolute haste increase to infer lust
 local LUST_ASSUMED_DURATION = 40
 
 local ICON_SIZE = 48
@@ -422,8 +424,9 @@ local function UpdateBloodlustState()
             state.lustExpiration = lustHasteExpiration
             state.lustDuration = LUST_ASSUMED_DURATION
         elseif lastHaste > 0
-               and currentHaste > lastHaste * LUST_HASTE_MULTIPLIER then
-            -- Large haste spike — infer lust activation
+               and currentHaste > lastHaste * LUST_HASTE_MULTIPLIER
+               and (currentHaste - lastHaste) >= LUST_HASTE_MIN_DELTA then
+            -- Large upward haste spike — infer lust activation
             lustHasteExpiration = GetTime() + LUST_ASSUMED_DURATION
             state.lustActive = true
             state.lustExpiration = lustHasteExpiration
@@ -494,7 +497,7 @@ local function UpdateBresState()
                 state.bresActive = true
                 state.bresMaxCharges = 1
                 local cooldownInfo = C_Spell.GetSpellCooldown(id)
-                if cooldownInfo and cooldownInfo.duration > 0 then
+                if cooldownInfo and cooldownInfo.duration > BRES_GCD_THRESHOLD then
                     state.bresCharges = 0
                     state.bresCooldownStart = cooldownInfo.startTime
                     state.bresCooldownDuration = cooldownInfo.duration
