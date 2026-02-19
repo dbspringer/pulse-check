@@ -105,6 +105,7 @@ local state = {
 local auraFallbackTicker = nil
 local lustPollTicker     = nil
 local lastHaste          = 0
+local peakHaste          = 0
 local lustHasteExpiration = 0
 local bresPollTicker     = nil
 local raidSatedTicker    = nil
@@ -424,6 +425,7 @@ local function UpdateBloodlustState()
             state.lustExpiration = lustHasteExpiration
             state.lustDuration = LUST_ASSUMED_DURATION
         elseif lastHaste > 0
+               and currentHaste > peakHaste
                and currentHaste > lastHaste * LUST_HASTE_MULTIPLIER
                and (currentHaste - lastHaste) >= LUST_HASTE_MIN_DELTA then
             -- Large upward haste spike — infer lust activation
@@ -437,6 +439,12 @@ local function UpdateBloodlustState()
         lustHasteExpiration = 0
     end
     lastHaste = currentHaste
+    if oldLustActive and not state.lustActive then
+        -- Lust just ended; reset peak so next lust can be detected
+        peakHaste = currentHaste
+    elseif currentHaste > peakHaste then
+        peakHaste = currentHaste
+    end
 
     state.sated = false
     state.satedExpiration = 0
@@ -1210,6 +1218,7 @@ local function UpdateInstancePolling()
         StopRaidSatedTicker()
         state.raidSated = false
         lastHaste = 0
+        peakHaste = 0
         lustHasteExpiration = 0
         UpdateBresState()
         RefreshBresIcon()
