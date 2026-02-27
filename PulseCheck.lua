@@ -30,6 +30,16 @@ for _, id in ipairs(SATED_IDS) do
     SATED_LOOKUP[id] = true
 end
 
+-- Non-lust abilities that can cause large haste spikes (false positives).
+-- Only the initial activation spike is suppressed; subsequent spikes are allowed.
+--   buff     = aura spell ID to check via C_UnitAuras
+--   cooldown = (optional) spell ID to check via C_Spell.GetSpellCooldown
+--              when aura API is blocked; must be known by the player (IsPlayerSpell)
+--   window   = (optional) seconds after cooldown use to consider active (default 30)
+local HASTE_EXCLUSIONS = {
+    { buff = 431698, cooldown = 370553, window = 30 }, -- Temporal Burst / Tip the Scales
+}
+
 local BRES_GCD_THRESHOLD    = 2     -- ignore cooldowns at or below GCD length
 local LUST_HASTE_MULTIPLIER = 1.25  -- 25% multiplicative haste increase to infer lust
 local LUST_HASTE_MIN_DELTA  = 20    -- minimum absolute haste increase to infer lust
@@ -107,6 +117,7 @@ local lustPollTicker     = nil
 local lastHaste          = 0
 local peakHaste          = 0
 local lustHasteExpiration = 0
+local hasteExclusionWasActive = {}
 local bresPollTicker     = nil
 local raidSatedTicker    = nil
 local useAuraFallback    = false
@@ -389,6 +400,28 @@ end
 -- Detection Functions
 -- ---------------------------------------------------------------------------
 
+-- Returns true if any haste exclusion JUST transitioned from inactive → active.
+-- Must be called every tick so state stays current regardless of haste delta.
+local function UpdateHasteExclusions()
+    local newActivation = false
+    for _, ex in ipairs(HASTE_EXCLUSIONS) do
+        local active = false
+        if C_UnitAuras.GetPlayerAuraBySpellID(ex.buff) then
+            active = true
+        elseif ex.cooldown and IsPlayerSpell(ex.cooldown) then
+            local info = C_Spell.GetSpellCooldown(ex.cooldown)
+            if info and info.startTime and info.startTime > 0 then
+                active = (GetTime() - info.startTime) <= (ex.window or 30)
+            end
+        end
+        if active and not hasteExclusionWasActive[ex.buff] then
+            newActivation = true
+        end
+        hasteExclusionWasActive[ex.buff] = active
+    end
+    return newActivation
+end
+
 local function UpdateBloodlustState()
     local oldLustActive = state.lustActive
     local oldLustExpiration = state.lustExpiration
@@ -413,6 +446,7 @@ local function UpdateBloodlustState()
 
     -- Fallback: if aura API is blocked, use haste delta to detect lust
     local currentHaste = GetHaste()
+    local hasteExclusionJustActivated = UpdateHasteExclusions()
     if not state.lustActive then
         if oldLustActive and oldLustExpiration > 0 and GetTime() < oldLustExpiration then
             -- Lust was active and hasn't expired; API is unreliable
@@ -427,7 +461,8 @@ local function UpdateBloodlustState()
         elseif lastHaste > 0
                and currentHaste > peakHaste
                and currentHaste > lastHaste * LUST_HASTE_MULTIPLIER
-               and (currentHaste - lastHaste) >= LUST_HASTE_MIN_DELTA then
+               and (currentHaste - lastHaste) >= LUST_HASTE_MIN_DELTA
+               and not hasteExclusionJustActivated then
             -- Large upward haste spike — infer lust activation
             lustHasteExpiration = GetTime() + LUST_ASSUMED_DURATION
             state.lustActive = true
@@ -1233,6 +1268,7 @@ local function UpdateInstancePolling()
         lastHaste = 0
         peakHaste = 0
         lustHasteExpiration = 0
+        hasteExclusionWasActive = {}
         UpdateBresState()
         RefreshBresIcon()
     end
