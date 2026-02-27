@@ -39,6 +39,9 @@ luac.out
 *.x86_64
 *.hex
 
+# macOS
+.DS_Store
+
 # AI / Claude Code
 .claude/
 CLAUDE.local.md
