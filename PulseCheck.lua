@@ -118,6 +118,7 @@ local lastHaste          = 0
 local peakHaste          = 0
 local lustHasteExpiration = 0
 local hasteExclusionWasActive = {}
+local lastExclusionCast  = {}
 local bresPollTicker     = nil
 local raidSatedTicker    = nil
 local useAuraFallback    = false
@@ -407,10 +408,8 @@ local function UpdateHasteExclusions()
     local isSecret = C_Secrets and C_Secrets.ShouldSpellAuraBeSecret
     for _, ex in ipairs(HASTE_EXCLUSIONS) do
         local active = false
-        -- When secret values are active, both aura and cooldown data are
-        -- restricted.  Skip detection entirely so the haste delta runs
-        -- unimpeded — a possible false positive is better than missing lust.
         if not (isSecret and isSecret(ex.buff)) then
+            -- Normal path: aura check, then cooldown fallback
             if C_UnitAuras.GetPlayerAuraBySpellID(ex.buff) then
                 active = true
             elseif ex.cooldown and IsPlayerSpell(ex.cooldown) then
@@ -419,6 +418,10 @@ local function UpdateHasteExclusions()
                     active = (GetTime() - info.startTime) <= (ex.window or 30)
                 end
             end
+        elseif ex.cooldown and lastExclusionCast[ex.buff] then
+            -- Secret path: aura and cooldown data are restricted.
+            -- Fall back to UNIT_SPELLCAST_SUCCEEDED timestamp.
+            active = (GetTime() - lastExclusionCast[ex.buff]) <= (ex.window or 30)
         end
         if active and not hasteExclusionWasActive[ex.buff] then
             newActivation = true
@@ -1282,6 +1285,7 @@ local function UpdateInstancePolling()
         peakHaste = 0
         lustHasteExpiration = 0
         hasteExclusionWasActive = {}
+        lastExclusionCast = {}
         UpdateBresState()
         RefreshBresIcon()
     end
@@ -1620,6 +1624,16 @@ local function OnEvent(self, event, ...)
             end
         end
 
+    elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+        local unit, _, spellID = ...
+        if unit ~= "player" then return end
+        for _, ex in ipairs(HASTE_EXCLUSIONS) do
+            if ex.cooldown and spellID == ex.cooldown then
+                lastExclusionCast[ex.buff] = GetTime()
+                break
+            end
+        end
+
     elseif event == "SPELL_UPDATE_CHARGES" then
         UpdateBresState()
         RefreshBresIcon()
@@ -1643,6 +1657,7 @@ eventFrame:SetScript("OnEvent", OnEvent)
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterUnitEvent("UNIT_AURA", "player")
+eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
 eventFrame:RegisterEvent("SPELL_UPDATE_CHARGES")
 eventFrame:RegisterEvent("ENCOUNTER_START")
 eventFrame:RegisterEvent("ENCOUNTER_END")
