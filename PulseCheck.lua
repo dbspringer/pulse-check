@@ -404,9 +404,11 @@ end
 -- Must be called every tick so state stays current regardless of haste delta.
 local function UpdateHasteExclusions()
     local newActivation = false
+    local isSecret = C_Secrets and C_Secrets.ShouldSpellAuraBeSecret
     for _, ex in ipairs(HASTE_EXCLUSIONS) do
         local active = false
-        if C_UnitAuras.GetPlayerAuraBySpellID(ex.buff) then
+        if not (isSecret and isSecret(ex.buff))
+           and C_UnitAuras.GetPlayerAuraBySpellID(ex.buff) then
             active = true
         elseif ex.cooldown and IsPlayerSpell(ex.cooldown) then
             local info = C_Spell.GetSpellCooldown(ex.cooldown)
