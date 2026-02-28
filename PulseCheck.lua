@@ -407,13 +407,17 @@ local function UpdateHasteExclusions()
     local isSecret = C_Secrets and C_Secrets.ShouldSpellAuraBeSecret
     for _, ex in ipairs(HASTE_EXCLUSIONS) do
         local active = false
-        if not (isSecret and isSecret(ex.buff))
-           and C_UnitAuras.GetPlayerAuraBySpellID(ex.buff) then
-            active = true
-        elseif ex.cooldown and IsPlayerSpell(ex.cooldown) then
-            local info = C_Spell.GetSpellCooldown(ex.cooldown)
-            if info and info.startTime and info.startTime > 0 then
-                active = (GetTime() - info.startTime) <= (ex.window or 30)
+        -- When secret values are active, both aura and cooldown data are
+        -- restricted.  Skip detection entirely so the haste delta runs
+        -- unimpeded — a possible false positive is better than missing lust.
+        if not (isSecret and isSecret(ex.buff)) then
+            if C_UnitAuras.GetPlayerAuraBySpellID(ex.buff) then
+                active = true
+            elseif ex.cooldown and IsPlayerSpell(ex.cooldown) then
+                local info = C_Spell.GetSpellCooldown(ex.cooldown)
+                if info and info.startTime and info.startTime > 0 then
+                    active = (GetTime() - info.startTime) <= (ex.window or 30)
+                end
             end
         end
         if active and not hasteExclusionWasActive[ex.buff] then
@@ -587,6 +591,13 @@ local function ScanRaidSated()
     else
         prefix = "party"
         count = GetNumGroupMembers() - 1
+    end
+
+    -- Aura spellId is a secret value during combat; cannot use as table key.
+    -- Preserve previous raidSated state until secrets clear.
+    if C_Secrets and C_Secrets.ShouldSpellAuraBeSecret
+       and C_Secrets.ShouldSpellAuraBeSecret(57723) then
+        return
     end
 
     for i = 1, count do
