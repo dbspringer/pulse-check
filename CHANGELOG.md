@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0
+
+- Replace Temporal Burst suppression with generic, table-driven haste exclusion system
+- Only suppress the initial activation spike of non-lust haste buffs — real bloodlust is still detected even while Temporal Burst is already active
+- Three-tier exclusion detection: aura API, cooldown fallback, and UNIT_SPELLCAST_SUCCEEDED for full coverage under 12.0 secret values
+- Fix secret value errors that halted bloodlust detection during combat (secret number comparisons, secret table keys)
+- Fix ScanRaidSated crash from secret spellId values in GetAuraDataByIndex
+
 ## 1.1.0
 
 - Fix false bloodlust alerts from temporary haste buffs and debuff recovery (e.g. Cinderbrew Meadery)

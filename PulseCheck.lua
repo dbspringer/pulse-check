@@ -30,6 +30,16 @@ for _, id in ipairs(SATED_IDS) do
     SATED_LOOKUP[id] = true
 end
 
+-- Non-lust abilities that can cause large haste spikes (false positives).
+-- Only the initial activation spike is suppressed; subsequent spikes are allowed.
+--   buff     = aura spell ID to check via C_UnitAuras
+--   cooldown = (optional) spell ID to check via C_Spell.GetSpellCooldown
+--              when aura API is blocked; must be known by the player (IsPlayerSpell)
+--   window   = (optional) seconds after cooldown use to consider active (default 30)
+local HASTE_EXCLUSIONS = {
+    { buff = 431698, cooldown = 370553, window = 30 }, -- Temporal Burst / Tip the Scales
+}
+
 local BRES_GCD_THRESHOLD    = 2     -- ignore cooldowns at or below GCD length
 local LUST_HASTE_MULTIPLIER = 1.25  -- 25% multiplicative haste increase to infer lust
 local LUST_HASTE_MIN_DELTA  = 20    -- minimum absolute haste increase to infer lust
@@ -107,6 +117,8 @@ local lustPollTicker     = nil
 local lastHaste          = 0
 local peakHaste          = 0
 local lustHasteExpiration = 0
+local hasteExclusionWasActive = {}
+local lastExclusionCast  = {}
 local bresPollTicker     = nil
 local raidSatedTicker    = nil
 local useAuraFallback    = false
@@ -389,6 +401,36 @@ end
 -- Detection Functions
 -- ---------------------------------------------------------------------------
 
+-- Returns true if any haste exclusion JUST transitioned from inactive → active.
+-- Must be called every tick so state stays current regardless of haste delta.
+local function UpdateHasteExclusions()
+    local newActivation = false
+    local isSecret = C_Secrets and C_Secrets.ShouldSpellAuraBeSecret
+    for _, ex in ipairs(HASTE_EXCLUSIONS) do
+        local active = false
+        if not (isSecret and isSecret(ex.buff)) then
+            -- Normal path: aura check, then cooldown fallback
+            if C_UnitAuras.GetPlayerAuraBySpellID(ex.buff) then
+                active = true
+            elseif ex.cooldown and IsPlayerSpell(ex.cooldown) then
+                local info = C_Spell.GetSpellCooldown(ex.cooldown)
+                if info and info.startTime and info.startTime > 0 then
+                    active = (GetTime() - info.startTime) <= (ex.window or 30)
+                end
+            end
+        elseif ex.cooldown and lastExclusionCast[ex.buff] then
+            -- Secret path: aura and cooldown data are restricted.
+            -- Fall back to UNIT_SPELLCAST_SUCCEEDED timestamp.
+            active = (GetTime() - lastExclusionCast[ex.buff]) <= (ex.window or 30)
+        end
+        if active and not hasteExclusionWasActive[ex.buff] then
+            newActivation = true
+        end
+        hasteExclusionWasActive[ex.buff] = active
+    end
+    return newActivation
+end
+
 local function UpdateBloodlustState()
     local oldLustActive = state.lustActive
     local oldLustExpiration = state.lustExpiration
@@ -413,6 +455,7 @@ local function UpdateBloodlustState()
 
     -- Fallback: if aura API is blocked, use haste delta to detect lust
     local currentHaste = GetHaste()
+    local hasteExclusionJustActivated = UpdateHasteExclusions()
     if not state.lustActive then
         if oldLustActive and oldLustExpiration > 0 and GetTime() < oldLustExpiration then
             -- Lust was active and hasn't expired; API is unreliable
@@ -427,7 +470,8 @@ local function UpdateBloodlustState()
         elseif lastHaste > 0
                and currentHaste > peakHaste
                and currentHaste > lastHaste * LUST_HASTE_MULTIPLIER
-               and (currentHaste - lastHaste) >= LUST_HASTE_MIN_DELTA then
+               and (currentHaste - lastHaste) >= LUST_HASTE_MIN_DELTA
+               and not hasteExclusionJustActivated then
             -- Large upward haste spike — infer lust activation
             lustHasteExpiration = GetTime() + LUST_ASSUMED_DURATION
             state.lustActive = true
@@ -550,6 +594,13 @@ local function ScanRaidSated()
     else
         prefix = "party"
         count = GetNumGroupMembers() - 1
+    end
+
+    -- Aura spellId is a secret value during combat; cannot use as table key.
+    -- Preserve previous raidSated state until secrets clear.
+    if C_Secrets and C_Secrets.ShouldSpellAuraBeSecret
+       and C_Secrets.ShouldSpellAuraBeSecret(57723) then
+        return
     end
 
     for i = 1, count do
@@ -1233,6 +1284,8 @@ local function UpdateInstancePolling()
         lastHaste = 0
         peakHaste = 0
         lustHasteExpiration = 0
+        hasteExclusionWasActive = {}
+        lastExclusionCast = {}
         UpdateBresState()
         RefreshBresIcon()
     end
@@ -1571,6 +1624,16 @@ local function OnEvent(self, event, ...)
             end
         end
 
+    elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+        local unit, _, spellID = ...
+        if unit ~= "player" then return end
+        for _, ex in ipairs(HASTE_EXCLUSIONS) do
+            if ex.cooldown and spellID == ex.cooldown then
+                lastExclusionCast[ex.buff] = GetTime()
+                break
+            end
+        end
+
     elseif event == "SPELL_UPDATE_CHARGES" then
         UpdateBresState()
         RefreshBresIcon()
@@ -1594,6 +1657,7 @@ eventFrame:SetScript("OnEvent", OnEvent)
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterUnitEvent("UNIT_AURA", "player")
+eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
 eventFrame:RegisterEvent("SPELL_UPDATE_CHARGES")
 eventFrame:RegisterEvent("ENCOUNTER_START")
 eventFrame:RegisterEvent("ENCOUNTER_END")

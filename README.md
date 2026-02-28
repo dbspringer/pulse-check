@@ -16,6 +16,8 @@ Both icons display in a compact, moveable frame with an optional backdrop.
 
 ## Installation
 
+Install from [CurseForge](https://www.curseforge.com/wow/addons/pulsecheck), or manually:
+
 1. Download or clone this repository
 2. Copy the `PulseCheck` folder into your WoW AddOns directory:
    - **Windows:** `World of Warcraft\_retail_\Interface\AddOns\`
