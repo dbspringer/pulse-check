@@ -74,7 +74,9 @@ local LSM_PREFERRED = {
 local DEFAULTS = {
     position    = nil,
     orientation = "horizontal",
-    scale       = 1.0,
+    scale          = 1.0,
+    showBackground = true,
+    showBorder     = true,
     visibility = {
         dungeons       = true,
         raids          = true,
@@ -720,6 +722,14 @@ local function SetScale(newScale)
     ApplyLayout()
 end
 
+local function ApplyBackdropStyle()
+    if not mainFrame then return end
+    local bgAlpha = PulseCheckDB.showBackground and 0.46 or 0
+    local borderAlpha = PulseCheckDB.showBorder and 1 or 0
+    mainFrame:SetBackdropColor(0, 0, 0, bgAlpha)
+    mainFrame:SetBackdropBorderColor(1, 1, 1, borderAlpha)
+end
+
 local function CreateUI()
     -- Parent container with backdrop
     mainFrame = CreateFrame("Frame", "PulseCheckFrame", UIParent, "BackdropTemplate")
@@ -731,8 +741,7 @@ local function CreateUI()
         edgeSize = 12,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
-    mainFrame:SetBackdropColor(0, 0, 0, 0.46)
-    mainFrame:SetBackdropBorderColor(1, 1, 1, 1)
+    ApplyBackdropStyle()
     mainFrame:SetFrameStrata("MEDIUM")
 
     -- Battle Res icon
