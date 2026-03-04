@@ -598,13 +598,6 @@ local function ScanRaidSated()
         count = GetNumGroupMembers() - 1
     end
 
-    -- Aura spellId is a secret value during combat; cannot use as table key.
-    -- Preserve previous raidSated state until secrets clear.
-    if C_Secrets and C_Secrets.ShouldSpellAuraBeSecret
-       and C_Secrets.ShouldSpellAuraBeSecret(57723) then
-        return
-    end
-
     for i = 1, count do
         local unit = prefix .. i
         if UnitExists(unit) then
@@ -612,7 +605,10 @@ local function ScanRaidSated()
             while true do
                 local aura = C_UnitAuras.GetAuraDataByIndex(unit, index, "HARMFUL")
                 if not aura then break end
-                if SATED_LOOKUP[aura.spellId] then
+                -- aura.spellId can be a secret value in 12.0; pcall the
+                -- table lookup so a tainted field doesn't throw.
+                local ok, found = pcall(rawget, SATED_LOOKUP, aura.spellId)
+                if ok and found then
                     state.raidSated = true
                     return
                 end
