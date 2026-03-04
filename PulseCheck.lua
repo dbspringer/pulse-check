@@ -1356,6 +1356,22 @@ local function BuildOptionsPanel()
         end
     )
 
+    local bgCB = CreateCheckbox(settingsPanel, L.SHOW_BACKGROUND, 200, -72,
+        function() return PulseCheckDB.showBackground end,
+        function(val)
+            PulseCheckDB.showBackground = val
+            ApplyBackdropStyle()
+        end
+    )
+
+    local borderCB = CreateCheckbox(settingsPanel, L.SHOW_BORDER, 380, -72,
+        function() return PulseCheckDB.showBorder end,
+        function(val)
+            PulseCheckDB.showBorder = val
+            ApplyBackdropStyle()
+        end
+    )
+
     -- Scale
     local scaleSlider = CreateSlider(settingsPanel, L.SCALE, 20, -110, 0.5, 2.0, 0.1,
         function() return PulseCheckDB.scale end,
@@ -1435,6 +1451,7 @@ local function BuildOptionsPanel()
         PulseCheckDB = CopyTable(DEFAULTS)
         ApplyLayout()
         RefreshVisibility()
+        ApplyBackdropStyle()
         if settingsCategory then
             Settings.OpenToCategory(settingsCategory:GetID())
         end
@@ -1444,6 +1461,8 @@ local function BuildOptionsPanel()
     settingsPanel:SetScript("OnShow", function()
         if mainFrame then mainFrame:Show() end
         vertCB:SetChecked(PulseCheckDB.orientation == "vertical")
+        bgCB:SetChecked(PulseCheckDB.showBackground)
+        borderCB:SetChecked(PulseCheckDB.showBorder)
         scaleSlider:SetValue(PulseCheckDB.scale)
         for _, opt in ipairs(panelVisOptions) do
             visCB[opt.key]:SetChecked(PulseCheckDB.visibility[opt.key])
