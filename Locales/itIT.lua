@@ -14,6 +14,8 @@ L.HEADER_SOUNDS           = "Suoni"
 -- Layout
 L.VERTICAL_ORIENTATION    = "Orientamento verticale"
 L.SCALE                   = "Scala"
+L.SHOW_BACKGROUND         = "Mostra sfondo"
+L.SHOW_BORDER             = "Mostra bordo"
 
 -- Visibility options
 L.VIS_DUNGEONS            = "Spedizioni"

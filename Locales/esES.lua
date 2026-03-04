@@ -14,6 +14,8 @@ L.HEADER_SOUNDS           = "Sonidos"
 -- Layout
 L.VERTICAL_ORIENTATION    = "Orientación vertical"
 L.SCALE                   = "Escala"
+L.SHOW_BACKGROUND         = "Mostrar fondo"
+L.SHOW_BORDER             = "Mostrar borde"
 
 -- Visibility options
 L.VIS_DUNGEONS            = "Mazmorras"
