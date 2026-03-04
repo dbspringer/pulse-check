@@ -13,6 +13,8 @@ L.HEADER_SOUNDS           = "Sounds"
 -- Layout
 L.VERTICAL_ORIENTATION    = "Vertical orientation"
 L.SCALE                   = "Scale"
+L.SHOW_BACKGROUND         = "Show background"
+L.SHOW_BORDER             = "Show border"
 
 -- Visibility options
 L.VIS_DUNGEONS            = "Dungeons"

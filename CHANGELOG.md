@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0
+
+- Add independent toggles to show/hide the main frame background and border
+- Fix ScanRaidSated crash when ShouldSpellAuraBeSecret disagrees with actual aura taint — use pcall(rawget) instead of pre-check
+- Add background and border toggle translations for all supported locales (deDE, esES, frFR, itIT, ptBR)
+
 ## 1.2.0
 
 - Replace Temporal Burst suppression with generic, table-driven haste exclusion system

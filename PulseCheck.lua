@@ -74,7 +74,9 @@ local LSM_PREFERRED = {
 local DEFAULTS = {
     position    = nil,
     orientation = "horizontal",
-    scale       = 1.0,
+    scale          = 1.0,
+    showBackground = true,
+    showBorder     = true,
     visibility = {
         dungeons       = true,
         raids          = true,
@@ -596,13 +598,6 @@ local function ScanRaidSated()
         count = GetNumGroupMembers() - 1
     end
 
-    -- Aura spellId is a secret value during combat; cannot use as table key.
-    -- Preserve previous raidSated state until secrets clear.
-    if C_Secrets and C_Secrets.ShouldSpellAuraBeSecret
-       and C_Secrets.ShouldSpellAuraBeSecret(57723) then
-        return
-    end
-
     for i = 1, count do
         local unit = prefix .. i
         if UnitExists(unit) then
@@ -610,7 +605,10 @@ local function ScanRaidSated()
             while true do
                 local aura = C_UnitAuras.GetAuraDataByIndex(unit, index, "HARMFUL")
                 if not aura then break end
-                if SATED_LOOKUP[aura.spellId] then
+                -- aura.spellId can be a secret value in 12.0; pcall the
+                -- table lookup so a tainted field doesn't throw.
+                local ok, found = pcall(rawget, SATED_LOOKUP, aura.spellId)
+                if ok and found then
                     state.raidSated = true
                     return
                 end
@@ -720,6 +718,14 @@ local function SetScale(newScale)
     ApplyLayout()
 end
 
+local function ApplyBackdropStyle()
+    if not mainFrame then return end
+    local bgAlpha = PulseCheckDB.showBackground and 0.46 or 0
+    local borderAlpha = PulseCheckDB.showBorder and 1 or 0
+    mainFrame:SetBackdropColor(0, 0, 0, bgAlpha)
+    mainFrame:SetBackdropBorderColor(1, 1, 1, borderAlpha)
+end
+
 local function CreateUI()
     -- Parent container with backdrop
     mainFrame = CreateFrame("Frame", "PulseCheckFrame", UIParent, "BackdropTemplate")
@@ -731,8 +737,7 @@ local function CreateUI()
         edgeSize = 12,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
-    mainFrame:SetBackdropColor(0, 0, 0, 0.46)
-    mainFrame:SetBackdropBorderColor(1, 1, 1, 1)
+    ApplyBackdropStyle()
     mainFrame:SetFrameStrata("MEDIUM")
 
     -- Battle Res icon
@@ -949,7 +954,7 @@ end
 
 local function CreateEditModeDialog()
     local dialog = CreateFrame("Frame", "PulseCheckEditDialog", UIParent, "BackdropTemplate")
-    dialog:SetSize(250, 520)
+    dialog:SetSize(250, 572)
     dialog:SetBackdrop({
         bgFile = "Interface/Tooltips/UI-Tooltip-Background",
         edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
@@ -976,8 +981,24 @@ local function CreateEditModeDialog()
         end
     )
 
+    local bgCB = CreateCheckbox(dialog, L.SHOW_BACKGROUND, 12, -62,
+        function() return PulseCheckDB.showBackground end,
+        function(val)
+            PulseCheckDB.showBackground = val
+            ApplyBackdropStyle()
+        end
+    )
+
+    local borderCB = CreateCheckbox(dialog, L.SHOW_BORDER, 12, -88,
+        function() return PulseCheckDB.showBorder end,
+        function(val)
+            PulseCheckDB.showBorder = val
+            ApplyBackdropStyle()
+        end
+    )
+
     local scaleRepositionTicker = nil
-    local scaleSlider = CreateSlider(dialog, L.SCALE, 16, -72, 0.5, 2.0, 0.1,
+    local scaleSlider = CreateSlider(dialog, L.SCALE, 16, -124, 0.5, 2.0, 0.1,
         function() return PulseCheckDB.scale end,
         function(val)
             SetScale(val)
@@ -991,17 +1012,17 @@ local function CreateEditModeDialog()
 
     -- Visibility header
     local visHeader = dialog:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    visHeader:SetPoint("TOPLEFT", 12, -110)
+    visHeader:SetPoint("TOPLEFT", 12, -162)
     visHeader:SetText(L.HEADER_VISIBILITY)
 
     local visCB = {}
     local visOptions = {
-        { key = "dungeons",       label = L.VIS_DUNGEONS,       y = -128 },
-        { key = "raids",          label = L.VIS_RAIDS,          y = -154 },
-        { key = "scenarios",      label = L.VIS_SCENARIOS,      y = -180 },
-        { key = "battlegrounds",  label = L.VIS_BATTLEGROUNDS,  y = -206 },
-        { key = "openWorld",      label = L.VIS_OPEN_WORLD,     y = -232 },
-        { key = "solo",           label = L.VIS_SOLO,           y = -258 },
+        { key = "dungeons",       label = L.VIS_DUNGEONS,       y = -180 },
+        { key = "raids",          label = L.VIS_RAIDS,          y = -206 },
+        { key = "scenarios",      label = L.VIS_SCENARIOS,      y = -232 },
+        { key = "battlegrounds",  label = L.VIS_BATTLEGROUNDS,  y = -258 },
+        { key = "openWorld",      label = L.VIS_OPEN_WORLD,     y = -284 },
+        { key = "solo",           label = L.VIS_SOLO,           y = -310 },
     }
     for _, opt in ipairs(visOptions) do
         visCB[opt.key] = CreateCheckbox(dialog, opt.label, 12, opt.y,
@@ -1015,39 +1036,39 @@ local function CreateEditModeDialog()
 
     -- Sounds header
     local soundHeader = dialog:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    soundHeader:SetPoint("TOPLEFT", 12, -288)
+    soundHeader:SetPoint("TOPLEFT", 12, -340)
     soundHeader:SetText(L.HEADER_SOUNDS)
 
-    local lustActiveCB = CreateCheckbox(dialog, L.SOUND_LUST_ACTIVE, 12, -306,
+    local lustActiveCB = CreateCheckbox(dialog, L.SOUND_LUST_ACTIVE, 12, -358,
         function() return PulseCheckDB.sound.lustActive end,
         function(val) PulseCheckDB.sound.lustActive = val end
     )
-    local lustActivePicker = CreateSoundPicker(dialog, 30, -332,
+    local lustActivePicker = CreateSoundPicker(dialog, 30, -384,
         function() return PulseCheckDB.sound.lustActiveSound end,
         function(val) PulseCheckDB.sound.lustActiveSound = val end
     )
 
-    local lustReadyCB = CreateCheckbox(dialog, L.SOUND_LUST_READY, 12, -358,
+    local lustReadyCB = CreateCheckbox(dialog, L.SOUND_LUST_READY, 12, -410,
         function() return PulseCheckDB.sound.lustReady end,
         function(val) PulseCheckDB.sound.lustReady = val end
     )
-    local lustReadyPicker = CreateSoundPicker(dialog, 30, -384,
+    local lustReadyPicker = CreateSoundPicker(dialog, 30, -436,
         function() return PulseCheckDB.sound.lustReadySound end,
         function(val) PulseCheckDB.sound.lustReadySound = val end
     )
 
-    local bresUsedCB = CreateCheckbox(dialog, L.SOUND_BRES_USED, 12, -410,
+    local bresUsedCB = CreateCheckbox(dialog, L.SOUND_BRES_USED, 12, -462,
         function() return PulseCheckDB.sound.bresUsed end,
         function(val) PulseCheckDB.sound.bresUsed = val end
     )
-    local bresUsedPicker = CreateSoundPicker(dialog, 30, -436,
+    local bresUsedPicker = CreateSoundPicker(dialog, 30, -488,
         function() return PulseCheckDB.sound.bresUsedSound end,
         function(val) PulseCheckDB.sound.bresUsedSound = val end
     )
 
     -- Reset Defaults button
     local resetBtn = CreateFrame("Button", nil, dialog, "UIPanelButtonTemplate")
-    resetBtn:SetPoint("TOPLEFT", 12, -478)
+    resetBtn:SetPoint("TOPLEFT", 12, -530)
     resetBtn:SetPoint("RIGHT", dialog, "RIGHT", -12, 0)
     resetBtn:SetHeight(24)
     resetBtn:SetText(L.RESET_DEFAULTS)
@@ -1058,6 +1079,9 @@ local function CreateEditModeDialog()
         RefreshVisibility()
         -- Refresh dialog widgets
         vertCB:SetChecked(PulseCheckDB.orientation == "vertical")
+        bgCB:SetChecked(PulseCheckDB.showBackground)
+        borderCB:SetChecked(PulseCheckDB.showBorder)
+        ApplyBackdropStyle()
         scaleSlider:SetValue(PulseCheckDB.scale)
         for _, opt in ipairs(visOptions) do
             visCB[opt.key]:SetChecked(PulseCheckDB.visibility[opt.key])
@@ -1073,6 +1097,8 @@ local function CreateEditModeDialog()
 
     dialog:SetScript("OnShow", function()
         vertCB:SetChecked(PulseCheckDB.orientation == "vertical")
+        bgCB:SetChecked(PulseCheckDB.showBackground)
+        borderCB:SetChecked(PulseCheckDB.showBorder)
         scaleSlider:SetValue(PulseCheckDB.scale)
         for _, opt in ipairs(visOptions) do
             visCB[opt.key]:SetChecked(PulseCheckDB.visibility[opt.key])
@@ -1326,6 +1352,22 @@ local function BuildOptionsPanel()
         end
     )
 
+    local bgCB = CreateCheckbox(settingsPanel, L.SHOW_BACKGROUND, 200, -72,
+        function() return PulseCheckDB.showBackground end,
+        function(val)
+            PulseCheckDB.showBackground = val
+            ApplyBackdropStyle()
+        end
+    )
+
+    local borderCB = CreateCheckbox(settingsPanel, L.SHOW_BORDER, 380, -72,
+        function() return PulseCheckDB.showBorder end,
+        function(val)
+            PulseCheckDB.showBorder = val
+            ApplyBackdropStyle()
+        end
+    )
+
     -- Scale
     local scaleSlider = CreateSlider(settingsPanel, L.SCALE, 20, -110, 0.5, 2.0, 0.1,
         function() return PulseCheckDB.scale end,
@@ -1405,6 +1447,7 @@ local function BuildOptionsPanel()
         PulseCheckDB = CopyTable(DEFAULTS)
         ApplyLayout()
         RefreshVisibility()
+        ApplyBackdropStyle()
         if settingsCategory then
             Settings.OpenToCategory(settingsCategory:GetID())
         end
@@ -1414,6 +1457,8 @@ local function BuildOptionsPanel()
     settingsPanel:SetScript("OnShow", function()
         if mainFrame then mainFrame:Show() end
         vertCB:SetChecked(PulseCheckDB.orientation == "vertical")
+        bgCB:SetChecked(PulseCheckDB.showBackground)
+        borderCB:SetChecked(PulseCheckDB.showBorder)
         scaleSlider:SetValue(PulseCheckDB.scale)
         for _, opt in ipairs(panelVisOptions) do
             visCB[opt.key]:SetChecked(PulseCheckDB.visibility[opt.key])
