@@ -29,4 +29,5 @@ Locales/esES.lua
 Locales/frFR.lua
 Locales/itIT.lua
 Locales/ptBR.lua
+Locales/ruRU.lua
 PulseCheck.lua
