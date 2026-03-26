@@ -1,15 +1,27 @@
 ## Interface: 120001
 ## Title: PulseCheck
 ## Notes: Battle rez and bloodlust cooldown tracking
+## Notes-ruRU: Отслеживание времени восстановления воскрешения в бою и кровожадности
 ## Author: KidMoxie
 ## Version: 1.3.0
 ## IconTexture: Interface\Icons\Spell_Nature_Bloodlust
-## Category: Combat
 ## DefaultState: enabled
 ## SavedVariables: PulseCheckDB
 ## X-License: MIT
 ## X-Website: https://github.com/dbspringer/pulse-check
 ## X-Curse-Project-ID: 1464211
+
+## Category-enUS: Combat
+## Category-deDE: Kampf
+## Category-esES: Combate
+## Category-esMX: Combate
+## Category-frFR: Combat
+## Category-itIT: Combattimento
+## Category-koKR: 전투
+## Category-ptBR: Combate
+## Category-ruRU: Бой
+## Category-zhCN: 战斗
+## Category-zhTW: 戰鬥
 
 Locales/enUS.lua
 Locales/deDE.lua
