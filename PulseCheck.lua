@@ -154,19 +154,13 @@ local function QueryPlayerAura(spellID)
 end
 
 -- Read duration/expiration from an aura, falling back to assumed values when
--- the fields are secret value placeholders or inaccessible (12.0 taint).
--- Uses pcall(rawget) to match the defensive pattern in ScanRaidSated —
--- field access on a tainted aura object can throw, not just return secrets.
+-- fields are inaccessible (tainted object) or secret value placeholders (12.0).
 local function SafeAuraTimer(aura, fallbackDuration)
     local ok, duration = pcall(rawget, aura, "duration")
     local ok2, expiration = pcall(rawget, aura, "expirationTime")
-    if not ok or not ok2 then
-        return fallbackDuration, GetTime() + fallbackDuration
-    end
-    if issecretvalue and (issecretvalue(duration) or issecretvalue(expiration)) then
-        return fallbackDuration, GetTime() + fallbackDuration
-    end
-    if not duration or not expiration or duration == 0 or expiration == 0 then
+    if not ok or not ok2
+       or (issecretvalue and (issecretvalue(duration) or issecretvalue(expiration)))
+       or not duration or not expiration or duration == 0 or expiration == 0 then
         return fallbackDuration, GetTime() + fallbackDuration
     end
     return duration, expiration
