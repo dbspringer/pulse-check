@@ -25,6 +25,27 @@ Research notes — February 2026
 
 During encounters, all class brez spells consume charges from the shared encounter system (tracked via `C_Spell.GetSpellCharges(20484)`). Outside encounters, each class spell has its own independent cooldown (tracked via `C_Spell.GetSpellCooldown(id)` + `IsPlayerSpell(id)`).
 
+### Drum Variants (15% haste, 40s duration, triggers Exhaustion)
+
+| Spell                       | ID      | Source                           |
+| --------------------------- | ------- | -------------------------------- |
+| Drums of Rage               | 146555  | MoP drums                       |
+| Netherwinds                 | 160452  | Hunter exotic pet                |
+| Drums of Fury               | 178207  | WoD drums                       |
+| Drums of Battle             | 204276  | Legion drums                    |
+| Drums of the Mountain       | 230935  | Legion drums                    |
+| Drums of the Maelstrom      | 256740  | BfA drums                       |
+| Drums of Battle (BfA)       | 272678  | BfA drums (alternate)           |
+| Drums of Battle (BfA)       | 275200  | BfA drums (alternate)           |
+| Drums of the Maelstrom      | 292686  | BfA drums (alternate)           |
+| Drums of Deathly Ferocity   | 309658  | Shadowlands drums               |
+| Feral Hide Drums            | 381301  | Dragonflight drums              |
+| Timeless Drums              | 441076  | TWW drums                       |
+| Thunderous Drums            | 444257  | TWW drums                       |
+| Void-touched Drums          | 1243972 | Midnight drums (12.0)           |
+
+Note: Drums give 15% haste (not 30%), so the haste-delta fallback (≥25% threshold) will **not** detect them. Detection relies entirely on the aura API or time-based expiration validation.
+
 ### Sated / Lockout Debuffs (10 min duration)
 
 | Debuff                 | ID     | Applied by              |
@@ -32,6 +53,8 @@ During encounters, all class brez spells consume charges from the shared encount
 | Sated                  | 57724  | Bloodlust / Primal Rage |
 | Exhaustion             | 57723  | Heroism                 |
 | Temporal Displacement  | 80354  | Time Warp               |
+| Insanity               | 95809  | Ancient Hysteria (pet)  |
+| Fatigued               | 160455 | Netherwinds (pet)       |
 | Fatigued               | 264689 | Primal Rage (alternate) |
 | Exhaustion (Evoker)    | 390435 | Fury of the Aspects     |
 
