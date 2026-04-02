@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.0
+
+- Add Void-Touched Drums (spell 1243972) to bloodlust buff detection — drums now show as an active glowing icon with countdown timer instead of skipping straight to the sated lockout
+- Harden aura field access with pcall(rawget) and issecretvalue checks — tainted aura objects in 12.0 can throw on field access, not just return secret placeholders
+- Add missing sated debuff IDs: Insanity (95809) from Ancient Hysteria and Fatigued (160455) from Netherwinds
+- Refresh all state when aura fallback ticker detects API recovery, clearing stale fallback timers
+- Organize BLOODLUST_IDS so class/pet abilities are checked first, giving real lust display priority over drums
+
 ## 1.3.0
 
 - Add independent toggles to show/hide the main frame background and border

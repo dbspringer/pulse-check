@@ -17,13 +17,16 @@ local BRES_CLASS_SPELLS = {
     391054,  -- Intercession (Paladin)
 }
 
+-- Class/pet abilities first, then drums.  Detection breaks on first hit, so
+-- real lust (30% haste) takes priority over drums (15%) when both are active.
 local BLOODLUST_IDS = {
-    2825, 32182, 80353, 90355, 178207, 230935, 256740, 160452,
-    275200, 272678, 204276, 146555, 309658, 292686, 264667,
-    390386, 381301, 441076, 444257, 466904,
+    2825, 32182, 80353, 90355, 264667, 390386, 466904,   -- class/pet abilities
+    146555, 160452, 178207, 204276, 230935, 256740,       -- older drums
+    272678, 275200, 292686, 309658, 381301,                -- BfA/SL drums
+    441076, 444257, 1243972,                               -- TWW/Midnight drums
 }
 
-local SATED_IDS = { 57723, 57724, 80354, 264689, 390435 }
+local SATED_IDS = { 57723, 57724, 80354, 95809, 160455, 264689, 390435 }
 
 local SATED_LOOKUP = {}
 for _, id in ipairs(SATED_IDS) do
@@ -142,6 +145,26 @@ local mainFrame, bresIcon, lustIcon
 -- ---------------------------------------------------------------------------
 -- Utility Functions
 -- ---------------------------------------------------------------------------
+
+-- Query the player for a specific aura by spell ID.  GetPlayerAuraBySpellID
+-- is purpose-built for the player unit and has no unit-visibility restriction
+-- (GetUnitAuraBySpellID can return nil during loading screens).
+local function QueryPlayerAura(spellID)
+    return C_UnitAuras.GetPlayerAuraBySpellID(spellID)
+end
+
+-- Read duration/expiration from an aura, falling back to assumed values when
+-- fields are inaccessible (tainted object) or secret value placeholders (12.0).
+local function SafeAuraTimer(aura, fallbackDuration)
+    local ok, duration = pcall(rawget, aura, "duration")
+    local ok2, expiration = pcall(rawget, aura, "expirationTime")
+    if not ok or not ok2
+       or (issecretvalue and (issecretvalue(duration) or issecretvalue(expiration)))
+       or not duration or not expiration or duration == 0 or expiration == 0 then
+        return fallbackDuration, GetTime() + fallbackDuration
+    end
+    return duration, expiration
+end
 
 local function MergeDefaults(saved, defaults)
     if type(saved) ~= "table" then return CopyTable(defaults) end
@@ -412,7 +435,7 @@ local function UpdateHasteExclusions()
         local active = false
         if not (isSecret and isSecret(ex.buff)) then
             -- Normal path: aura check, then cooldown fallback
-            if C_UnitAuras.GetPlayerAuraBySpellID(ex.buff) then
+            if QueryPlayerAura(ex.buff) then
                 active = true
             elseif ex.cooldown and IsPlayerSpell(ex.cooldown) then
                 local info = C_Spell.GetSpellCooldown(ex.cooldown)
@@ -446,11 +469,10 @@ local function UpdateBloodlustState()
     state.lustDuration = 0
 
     for _, id in ipairs(BLOODLUST_IDS) do
-        local aura = C_UnitAuras.GetPlayerAuraBySpellID(id)
+        local aura = QueryPlayerAura(id)
         if aura then
             state.lustActive = true
-            state.lustExpiration = aura.expirationTime
-            state.lustDuration = aura.duration or LUST_ASSUMED_DURATION
+            state.lustDuration, state.lustExpiration = SafeAuraTimer(aura, LUST_ASSUMED_DURATION)
             break
         end
     end
@@ -497,11 +519,10 @@ local function UpdateBloodlustState()
     state.satedDuration = 0
 
     for _, id in ipairs(SATED_IDS) do
-        local aura = C_UnitAuras.GetPlayerAuraBySpellID(id)
+        local aura = QueryPlayerAura(id)
         if aura then
             state.sated = true
-            state.satedExpiration = aura.expirationTime
-            state.satedDuration = aura.duration or 600
+            state.satedDuration, state.satedExpiration = SafeAuraTimer(aura, 600)
             break
         end
     end
@@ -1233,6 +1254,8 @@ local function StartAuraFallbackTicker()
             useAuraFallback = false
             auraFallbackTicker:Cancel()
             auraFallbackTicker = nil
+            -- API is working again; refresh to clear stale fallback timers
+            RefreshAll()
             return
         end
         if UpdateBloodlustState() then
