@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.1
+
+- Add Russian (ruRU) locale with full translation of all UI strings, panel labels, commands, and help text (thanks @Hollicsh!)
+- Add localized Category metadata for addon browser in all supported WoW client languages
+
 ## 1.4.0
 
 - Add Void-Touched Drums (spell 1243972) to bloodlust buff detection — drums now show as an active glowing icon with countdown timer instead of skipping straight to the sated lockout
