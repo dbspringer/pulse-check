@@ -510,24 +510,37 @@ local function UpdateBloodlustState()
             state.lustExpiration = oldLustExpiration
             state.lustDuration = oldLustDuration
         elseif lustHasteExpiration > 0 and GetTime() < lustHasteExpiration then
-            -- Previously inferred via haste, still within expected duration
+            -- Previously confirmed via haste, still within expected duration
             state.lustActive = true
             state.lustExpiration = lustHasteExpiration
             state.lustDuration = LUST_ASSUMED_DURATION
+        elseif lustHastePendingUntil > 0 then
+            -- Pending sated-gate: waiting to confirm or discard a haste spike
+            if GetTime() >= lustHastePendingUntil then
+                -- Grace period elapsed — check for sated confirmation
+                if oldSated or not CanQuerySatedAuras() then
+                    -- Sated detected, or API is blocked (can't disprove lust)
+                    lustHasteExpiration = GetTime() + LUST_ASSUMED_DURATION
+                    state.lustActive = true
+                    state.lustExpiration = lustHasteExpiration
+                    state.lustDuration = LUST_ASSUMED_DURATION
+                end
+                -- Either way, pending is resolved
+                lustHastePendingUntil = 0
+            end
+            -- While pending, do not set lustActive (no UI flash)
         elseif lastHaste > 0
                and currentHaste > peakHaste
                and currentHaste > lastHaste * LUST_HASTE_MULTIPLIER
                and (currentHaste - lastHaste) >= LUST_HASTE_MIN_DELTA
                and not hasteExclusionJustActivated then
-            -- Large upward haste spike — infer lust activation
-            lustHasteExpiration = GetTime() + LUST_ASSUMED_DURATION
-            state.lustActive = true
-            state.lustExpiration = lustHasteExpiration
-            state.lustDuration = LUST_ASSUMED_DURATION
+            -- Large upward haste spike — enter pending state for sated-gate
+            lustHastePendingUntil = GetTime() + 1
         end
     else
-        -- Aura API confirmed lust; clear haste inference
+        -- Aura API confirmed lust; clear haste inference and any pending state
         lustHasteExpiration = 0
+        lustHastePendingUntil = 0
     end
     lastHaste = currentHaste
     if oldLustActive and not state.lustActive then
