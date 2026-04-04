@@ -41,11 +41,11 @@ end
 --   window   = (optional) seconds after cooldown use to consider active (default 30)
 local HASTE_EXCLUSIONS = {
     { buff = 431698, cooldown = 370553, window = 30 }, -- Temporal Burst / Tip the Scales (Evoker)
-    { buff = 10060,                     window = 15 }, -- Power Infusion (Priest, any target)
+    { buff = 10060,                     window = 15 }, -- Power Infusion (Priest); no cooldown — cast on any player
     { buff = 162264, cooldown = 191427, window = 20 }, -- Metamorphosis (Havoc DH)
     { buff = 12472,  cooldown = 12472,  window = 25 }, -- Icy Veins (Frost Mage)
     { buff = 231895, cooldown = 231895, window = 27 }, -- Crusade (Ret Paladin)
-    { buff = 382043,                    window = 12 }, -- Surging Elements (Enh Shaman)
+    { buff = 382043,                    window = 12 }, -- Surging Elements (Enh Shaman); no cooldown — proc, not cast
     { buff = 114052, cooldown = 114052, window = 10 }, -- Ascendance (Resto Shaman) / Preeminence
     { buff = 114050, cooldown = 114050, window = 10 }, -- Ascendance (Ele Shaman) / Preeminence
 }
@@ -472,7 +472,8 @@ local function CanQuerySatedAuras()
         return true  -- pre-12.0 or secrets API unavailable; aura API is open
     end
     for _, id in ipairs(SATED_IDS) do
-        if C_Secrets.ShouldSpellAuraBeSecret(id) then
+        local ok, isSecret = pcall(C_Secrets.ShouldSpellAuraBeSecret, id)
+        if not ok or isSecret then
             return false
         end
     end
@@ -510,7 +511,7 @@ local function UpdateBloodlustState()
             state.lustExpiration = oldLustExpiration
             state.lustDuration = oldLustDuration
         elseif lustHasteExpiration > 0 and GetTime() < lustHasteExpiration then
-            -- Previously confirmed via haste, still within expected duration
+            -- Previously inferred via haste, still within expected duration
             state.lustActive = true
             state.lustExpiration = lustHasteExpiration
             state.lustDuration = LUST_ASSUMED_DURATION
@@ -578,14 +579,14 @@ local function UpdateBloodlustState()
     if lustHastePendingUntil > 0 and not state.lustActive then
         if GetTime() >= lustHastePendingUntil then
             if state.sated or useAuraFallback or not CanQuerySatedAuras() then
-                -- Sated detected, aura API is in fallback mode, or API is
-                -- blocked by secret values — promote to confirmed lust.
+                -- Sated detected, lust auras are secret (useAuraFallback), or
+                -- sated auras are secret (CanQuerySatedAuras) — promote.
                 lustHasteExpiration = GetTime() + LUST_ASSUMED_DURATION
                 state.lustActive = true
                 state.lustExpiration = lustHasteExpiration
                 state.lustDuration = LUST_ASSUMED_DURATION
             end
-            -- Either way, pending is resolved
+            -- Either way, pending is resolved (no promotion = false positive discarded)
             lustHastePendingUntil = 0
         end
     elseif state.lustActive then
