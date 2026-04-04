@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.0
+
+- Add sated-gate to haste-delta bloodlust inference — haste spikes without a sated debuff are no longer treated as bloodlust
+- Expand haste exclusion list: Power Infusion, Metamorphosis (Havoc DH), Icy Veins (Frost Mage), Crusade (Ret Paladin), Surging Elements (Enh Shaman), Ascendance (Resto/Ele Shaman with Preeminence)
+
 ## 1.4.1
 
 - Add Russian (ruRU) locale with full translation of all UI strings, panel labels, commands, and help text (thanks @Hollicsh!)

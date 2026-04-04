@@ -40,7 +40,14 @@ end
 --              when aura API is blocked; must be known by the player (IsPlayerSpell)
 --   window   = (optional) seconds after cooldown use to consider active (default 30)
 local HASTE_EXCLUSIONS = {
-    { buff = 431698, cooldown = 370553, window = 30 }, -- Temporal Burst / Tip the Scales
+    { buff = 431698, cooldown = 370553, window = 30 }, -- Temporal Burst / Tip the Scales (Evoker)
+    { buff = 10060,                     window = 15 }, -- Power Infusion (Priest); no cooldown — cast on any player
+    { buff = 162264, cooldown = 191427, window = 20 }, -- Metamorphosis (Havoc DH)
+    { buff = 12472,  cooldown = 12472,  window = 25 }, -- Icy Veins (Frost Mage)
+    { buff = 231895, cooldown = 231895, window = 27 }, -- Crusade (Ret Paladin)
+    { buff = 382043,                    window = 12 }, -- Surging Elements (Enh Shaman); no cooldown — proc, not cast
+    { buff = 114052, cooldown = 114052, window = 10 }, -- Ascendance (Resto Shaman) / Preeminence
+    { buff = 114050, cooldown = 114050, window = 10 }, -- Ascendance (Ele Shaman) / Preeminence
 }
 
 local BRES_GCD_THRESHOLD    = 2     -- ignore cooldowns at or below GCD length
@@ -122,6 +129,7 @@ local lustPollTicker     = nil
 local lastHaste          = 0
 local peakHaste          = 0
 local lustHasteExpiration = 0
+local lustHastePendingUntil = 0
 local hasteExclusionWasActive = {}
 local lastExclusionCast  = {}
 local bresPollTicker     = nil
@@ -456,6 +464,22 @@ local function UpdateHasteExclusions()
     return newActivation
 end
 
+-- Returns true if the aura API can query sated IDs without secret-value
+-- restrictions.  Used by the sated-gate to distinguish "sated is genuinely
+-- absent" from "the API is blocked and we can't tell."
+local function CanQuerySatedAuras()
+    if not C_Secrets or not C_Secrets.ShouldSpellAuraBeSecret then
+        return true  -- pre-12.0 or secrets API unavailable; aura API is open
+    end
+    for _, id in ipairs(SATED_IDS) do
+        local ok, isSecret = pcall(C_Secrets.ShouldSpellAuraBeSecret, id)
+        if not ok or isSecret then
+            return false
+        end
+    end
+    return true
+end
+
 local function UpdateBloodlustState()
     local oldLustActive = state.lustActive
     local oldLustExpiration = state.lustExpiration
@@ -491,20 +515,20 @@ local function UpdateBloodlustState()
             state.lustActive = true
             state.lustExpiration = lustHasteExpiration
             state.lustDuration = LUST_ASSUMED_DURATION
+        elseif lustHastePendingUntil > 0 then
+            -- Pending sated-gate: resolved after sated scan below (no-op here)
         elseif lastHaste > 0
                and currentHaste > peakHaste
                and currentHaste > lastHaste * LUST_HASTE_MULTIPLIER
                and (currentHaste - lastHaste) >= LUST_HASTE_MIN_DELTA
                and not hasteExclusionJustActivated then
-            -- Large upward haste spike — infer lust activation
-            lustHasteExpiration = GetTime() + LUST_ASSUMED_DURATION
-            state.lustActive = true
-            state.lustExpiration = lustHasteExpiration
-            state.lustDuration = LUST_ASSUMED_DURATION
+            -- Large upward haste spike — enter pending state for sated-gate
+            lustHastePendingUntil = GetTime() + 1
         end
     else
-        -- Aura API confirmed lust; clear haste inference
+        -- Aura API confirmed lust; clear haste inference and any pending state
         lustHasteExpiration = 0
+        lustHastePendingUntil = 0
     end
     lastHaste = currentHaste
     if oldLustActive and not state.lustActive then
@@ -547,6 +571,24 @@ local function UpdateBloodlustState()
             state.sated = true
             state.satedExpiration = satedExpiration
             state.satedDuration = 600
+        end
+    end
+
+    -- Sated-gate resolution: now that this tick's sated state is known, decide
+    -- whether a pending haste spike is real lust or a false positive.
+    if lustHastePendingUntil > 0 and not state.lustActive then
+        local now = GetTime()
+        if now >= lustHastePendingUntil then
+            if state.sated or useAuraFallback or not CanQuerySatedAuras() then
+                -- Sated detected, lust auras are secret (useAuraFallback), or
+                -- sated auras are secret (CanQuerySatedAuras) — promote.
+                lustHasteExpiration = now + LUST_ASSUMED_DURATION
+                state.lustActive = true
+                state.lustExpiration = lustHasteExpiration
+                state.lustDuration = LUST_ASSUMED_DURATION
+            end
+            -- Either way, pending is resolved (no promotion = false positive discarded)
+            lustHastePendingUntil = 0
         end
     end
 
@@ -1333,6 +1375,7 @@ local function UpdateInstancePolling()
         lastHaste = 0
         peakHaste = 0
         lustHasteExpiration = 0
+        lustHastePendingUntil = 0
         hasteExclusionWasActive = {}
         lastExclusionCast = {}
         UpdateBresState()
