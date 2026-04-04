@@ -40,7 +40,14 @@ end
 --              when aura API is blocked; must be known by the player (IsPlayerSpell)
 --   window   = (optional) seconds after cooldown use to consider active (default 30)
 local HASTE_EXCLUSIONS = {
-    { buff = 431698, cooldown = 370553, window = 30 }, -- Temporal Burst / Tip the Scales
+    { buff = 431698, cooldown = 370553, window = 30 }, -- Temporal Burst / Tip the Scales (Evoker)
+    { buff = 10060,                     window = 15 }, -- Power Infusion (Priest, any target)
+    { buff = 162264, cooldown = 191427, window = 20 }, -- Metamorphosis (Havoc DH)
+    { buff = 12472,  cooldown = 12472,  window = 25 }, -- Icy Veins (Frost Mage)
+    { buff = 231895, cooldown = 231895, window = 27 }, -- Crusade (Ret Paladin)
+    { buff = 382043,                    window = 12 }, -- Surging Elements (Enh Shaman)
+    { buff = 114052, cooldown = 114052, window = 10 }, -- Ascendance (Resto Shaman) / Preeminence
+    { buff = 114050, cooldown = 114050, window = 10 }, -- Ascendance (Ele Shaman) / Preeminence
 }
 
 local BRES_GCD_THRESHOLD    = 2     -- ignore cooldowns at or below GCD length
