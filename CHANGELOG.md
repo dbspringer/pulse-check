@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.4.2
+## 1.5.0
 
 - Add sated-gate to haste-delta bloodlust inference — haste spikes without a sated debuff are no longer treated as bloodlust
 - Expand haste exclusion list: Power Infusion, Metamorphosis (Havoc DH), Icy Veins (Frost Mage), Crusade (Ret Paladin), Surging Elements (Enh Shaman), Ascendance (Resto/Ele Shaman with Preeminence)

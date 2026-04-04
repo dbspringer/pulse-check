@@ -3,7 +3,7 @@
 ## Notes: Battle rez and bloodlust cooldown tracking
 ## Notes-ruRU: Отслеживание времени восстановления боевого воскрешения и жажды крови (БЛ)
 ## Author: KidMoxie
-## Version: 1.4.2
+## Version: 1.5.0
 ## IconTexture: Interface\Icons\Spell_Nature_Bloodlust
 ## DefaultState: enabled
 ## SavedVariables: PulseCheckDB

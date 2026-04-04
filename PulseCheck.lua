@@ -577,11 +577,12 @@ local function UpdateBloodlustState()
     -- Sated-gate resolution: now that this tick's sated state is known, decide
     -- whether a pending haste spike is real lust or a false positive.
     if lustHastePendingUntil > 0 and not state.lustActive then
-        if GetTime() >= lustHastePendingUntil then
+        local now = GetTime()
+        if now >= lustHastePendingUntil then
             if state.sated or useAuraFallback or not CanQuerySatedAuras() then
                 -- Sated detected, lust auras are secret (useAuraFallback), or
                 -- sated auras are secret (CanQuerySatedAuras) — promote.
-                lustHasteExpiration = GetTime() + LUST_ASSUMED_DURATION
+                lustHasteExpiration = now + LUST_ASSUMED_DURATION
                 state.lustActive = true
                 state.lustExpiration = lustHasteExpiration
                 state.lustDuration = LUST_ASSUMED_DURATION
@@ -589,9 +590,6 @@ local function UpdateBloodlustState()
             -- Either way, pending is resolved (no promotion = false positive discarded)
             lustHastePendingUntil = 0
         end
-    elseif state.lustActive then
-        -- Aura API or time-based persistence confirmed lust; clear pending
-        lustHastePendingUntil = 0
     end
 
     -- Sound on state transitions
