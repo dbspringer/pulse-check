@@ -515,20 +515,7 @@ local function UpdateBloodlustState()
             state.lustExpiration = lustHasteExpiration
             state.lustDuration = LUST_ASSUMED_DURATION
         elseif lustHastePendingUntil > 0 then
-            -- Pending sated-gate: waiting to confirm or discard a haste spike
-            if GetTime() >= lustHastePendingUntil then
-                -- Grace period elapsed — check for sated confirmation
-                if oldSated or not CanQuerySatedAuras() then
-                    -- Sated detected, or API is blocked (can't disprove lust)
-                    lustHasteExpiration = GetTime() + LUST_ASSUMED_DURATION
-                    state.lustActive = true
-                    state.lustExpiration = lustHasteExpiration
-                    state.lustDuration = LUST_ASSUMED_DURATION
-                end
-                -- Either way, pending is resolved
-                lustHastePendingUntil = 0
-            end
-            -- While pending, do not set lustActive (no UI flash)
+            -- Pending sated-gate: resolved after sated scan below (no-op here)
         elseif lastHaste > 0
                and currentHaste > peakHaste
                and currentHaste > lastHaste * LUST_HASTE_MULTIPLIER
@@ -584,6 +571,26 @@ local function UpdateBloodlustState()
             state.satedExpiration = satedExpiration
             state.satedDuration = 600
         end
+    end
+
+    -- Sated-gate resolution: now that this tick's sated state is known, decide
+    -- whether a pending haste spike is real lust or a false positive.
+    if lustHastePendingUntil > 0 and not state.lustActive then
+        if GetTime() >= lustHastePendingUntil then
+            if state.sated or useAuraFallback or not CanQuerySatedAuras() then
+                -- Sated detected, aura API is in fallback mode, or API is
+                -- blocked by secret values — promote to confirmed lust.
+                lustHasteExpiration = GetTime() + LUST_ASSUMED_DURATION
+                state.lustActive = true
+                state.lustExpiration = lustHasteExpiration
+                state.lustDuration = LUST_ASSUMED_DURATION
+            end
+            -- Either way, pending is resolved
+            lustHastePendingUntil = 0
+        end
+    elseif state.lustActive then
+        -- Aura API or time-based persistence confirmed lust; clear pending
+        lustHastePendingUntil = 0
     end
 
     -- Sound on state transitions
