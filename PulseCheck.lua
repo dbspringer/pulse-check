@@ -129,6 +129,7 @@ local lustPollTicker     = nil
 local lastHaste          = 0
 local peakHaste          = 0
 local lustHasteExpiration = 0
+local lustHastePendingUntil = 0
 local hasteExclusionWasActive = {}
 local lastExclusionCast  = {}
 local bresPollTicker     = nil
@@ -1340,6 +1341,7 @@ local function UpdateInstancePolling()
         lastHaste = 0
         peakHaste = 0
         lustHasteExpiration = 0
+        lustHastePendingUntil = 0
         hasteExclusionWasActive = {}
         lastExclusionCast = {}
         UpdateBresState()
