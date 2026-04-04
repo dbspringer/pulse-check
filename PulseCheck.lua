@@ -464,6 +464,21 @@ local function UpdateHasteExclusions()
     return newActivation
 end
 
+-- Returns true if the aura API can query sated IDs without secret-value
+-- restrictions.  Used by the sated-gate to distinguish "sated is genuinely
+-- absent" from "the API is blocked and we can't tell."
+local function CanQuerySatedAuras()
+    if not C_Secrets or not C_Secrets.ShouldSpellAuraBeSecret then
+        return true  -- pre-12.0 or secrets API unavailable; aura API is open
+    end
+    for _, id in ipairs(SATED_IDS) do
+        if C_Secrets.ShouldSpellAuraBeSecret(id) then
+            return false
+        end
+    end
+    return true
+end
+
 local function UpdateBloodlustState()
     local oldLustActive = state.lustActive
     local oldLustExpiration = state.lustExpiration
