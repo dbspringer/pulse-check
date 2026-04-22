@@ -42,7 +42,7 @@ Patch 12.0 introduced "secret values" that can restrict aura data on tainted exe
 - `C_Secrets.ShouldSpellAuraBeSecret(id)` to check if an aura is restricted at runtime
 - `issecretvalue(value)` to check if a returned field is a secret value placeholder; `pcall(rawget, aura, field)` to safely access fields on potentially tainted aura objects
 - Lightweight polling via `C_Timer.NewTicker` instead of `UNIT_AURA` event registration if taint is a concern
-- **Haste-delta fallback** for bloodlust: when the aura API is blocked, a >25% multiplicative haste spike (`currentHaste > lastHaste * 1.25`) infers lust activation with an assumed 40s duration. Note: drums (15% haste) fall below this threshold — drum detection relies on the aura API or time-based expiration validation
+- **Haste-delta fallback** for bloodlust: when the aura API is blocked, a >25% multiplicative haste spike (`currentHaste > lastHaste * 1.25`) infers lust activation with an assumed 40s duration. Note: drums (15% haste) fall below this threshold — drum detection relies on the aura API or time-based expiration validation. As of 12.0.5, `GetHaste()` itself becomes secret whenever auras are secret ("APIs returning player stats now return secrets if auras are secret"), so this path is largely dormant — `SafeGetHaste()` returns nil and the tick is skipped. Kept around for partial-taint cases
 - **Time-based expiration validation** for both lust and sated: when aura API returns nil during combat (due to taint), compare `GetTime()` against the previously saved expiration to distinguish real expiration from API failure
 - **Instance-based polling**: `C_Timer.NewTicker` loops for lust (1s), bres (0.5s), and raid-sated (3s) start automatically inside instanced content and stop outside it
 
@@ -57,7 +57,7 @@ Patch 12.0 introduced "secret values" that can restrict aura data on tainted exe
 | `C_Spell.GetSpellCharges(id)` | Encounter brez charge info (charges, cooldown, max) |
 | `C_Spell.GetSpellCooldown(id)` | Personal spell cooldown info (for brez fallback) |
 | `IsPlayerSpell(id)` | Check if player knows a spell (brez class detection) |
-| `GetHaste()` | Player's current haste % (unrestricted by secret values) |
+| `GetHaste()` | Player's current haste %. As of 12.0.5, returns a secret value when auras are secret — always read via `SafeGetHaste()` |
 | `C_Secrets.ShouldSpellAuraBeSecret(id)` | Check if aura data is protected (12.0+) |
 | `issecretvalue(value)` | Check if a returned value is a secret placeholder (12.0+) |
 | `GetInstanceInfo()` | Returns instance type for visibility and polling decisions |

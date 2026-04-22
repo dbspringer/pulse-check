@@ -161,6 +161,17 @@ local function QueryPlayerAura(spellID)
     return C_UnitAuras.GetPlayerAuraBySpellID(spellID)
 end
 
+-- Read GetHaste() safely.  Patch 12.0.5 introduced taint on GetHaste() under
+-- tainted execution paths; the returned value can be a secret placeholder
+-- that blows up any arithmetic or comparison.  Return nil when that happens
+-- so callers can skip haste-based inference for this tick.
+local function SafeGetHaste()
+    local ok, haste = pcall(GetHaste)
+    if not ok or haste == nil then return nil end
+    if issecretvalue and issecretvalue(haste) then return nil end
+    return haste
+end
+
 -- Read duration/expiration from an aura, falling back to assumed values when
 -- fields are inaccessible (tainted object) or secret value placeholders (12.0).
 local function SafeAuraTimer(aura, fallbackDuration)
@@ -501,8 +512,10 @@ local function UpdateBloodlustState()
         end
     end
 
-    -- Fallback: if aura API is blocked, use haste delta to detect lust
-    local currentHaste = GetHaste()
+    -- Fallback: if aura API is blocked, use haste delta to detect lust.
+    -- SafeGetHaste returns nil when the value is a secret placeholder; in that
+    -- case we skip haste inference this tick and preserve prior lastHaste/peakHaste.
+    local currentHaste = SafeGetHaste()
     local hasteExclusionJustActivated = UpdateHasteExclusions()
     if not state.lustActive then
         if oldLustActive and oldLustExpiration > 0 and GetTime() < oldLustExpiration then
@@ -517,7 +530,7 @@ local function UpdateBloodlustState()
             state.lustDuration = LUST_ASSUMED_DURATION
         elseif lustHastePendingUntil > 0 then
             -- Pending sated-gate: resolved after sated scan below (no-op here)
-        elseif lastHaste > 0
+        elseif currentHaste and lastHaste > 0
                and currentHaste > peakHaste
                and currentHaste > lastHaste * LUST_HASTE_MULTIPLIER
                and (currentHaste - lastHaste) >= LUST_HASTE_MIN_DELTA
@@ -530,12 +543,14 @@ local function UpdateBloodlustState()
         lustHasteExpiration = 0
         lustHastePendingUntil = 0
     end
-    lastHaste = currentHaste
-    if oldLustActive and not state.lustActive then
-        -- Lust just ended; reset peak so next lust can be detected
-        peakHaste = currentHaste
-    elseif currentHaste > peakHaste then
-        peakHaste = currentHaste
+    if currentHaste then
+        lastHaste = currentHaste
+        if oldLustActive and not state.lustActive then
+            -- Lust just ended; reset peak so next lust can be detected
+            peakHaste = currentHaste
+        elseif currentHaste > peakHaste then
+            peakHaste = currentHaste
+        end
     end
 
     state.sated = false
@@ -1753,6 +1768,11 @@ local function OnEvent(self, event, ...)
         RefreshAll()
 
     elseif event == "ENCOUNTER_END" or event == "CHALLENGE_MODE_COMPLETED" then
+        -- Reset haste baselines so stale values from this encounter can't trip
+        -- a false spike on the next one (especially after long tainted windows
+        -- where SafeGetHaste returned nil and baselines froze).
+        lastHaste = 0
+        peakHaste = 0
         state.raidSated = false
         RefreshAll()
 
