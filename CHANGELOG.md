@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.0
+
+- Fix error when `GetHaste()` returns a secret value under tainted execution in 12.0.5 — haste-delta inference now safely skips the tick instead of throwing on arithmetic
+- Reset haste baselines on `ENCOUNTER_END` so stale readings from long tainted windows can't trip a false spike on the next encounter
+- Bump Interface to 120005 for patch 12.0.5
+
 ## 1.5.0
 
 - Add sated-gate to haste-delta bloodlust inference — haste spikes without a sated debuff are no longer treated as bloodlust
