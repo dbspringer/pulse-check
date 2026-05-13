@@ -33,6 +33,11 @@ for _, id in ipairs(SATED_IDS) do
     SATED_LOOKUP[id] = true
 end
 
+local BLOODLUST_LOOKUP = {}
+for _, id in ipairs(BLOODLUST_IDS) do
+    BLOODLUST_LOOKUP[id] = true
+end
+
 -- Non-lust abilities that can cause large haste spikes (false positives).
 -- Only the initial activation spike is suppressed; subsequent spikes are allowed.
 --   buff     = aura spell ID to check via C_UnitAuras
@@ -1691,6 +1696,36 @@ SlashCmdList["PULSECHECK"] = HandleSlashCommand
 
 local eventFrame = CreateFrame("Frame")
 
+-- Cast-based lust detection.  In 12.0.5 raids/Mythic dungeons the aura API,
+-- GetHaste(), and GetAuraDataByIndex are all gated behind secret values, so
+-- UpdateBloodlustState has no working path.  Spellcast events aren't subject
+-- to that gating, so a successful bloodlust cast by any group member is the
+-- last reliable signal we have that lust just landed on the player.
+local function IsOurGroupCaster(unit)
+    if unit == "player" or unit == "pet" then return true end
+    if UnitInRaid(unit) or UnitInParty(unit) then return true end
+    -- Pet tokens don't satisfy UnitInRaid/UnitInParty; match explicitly.
+    return unit:match("^partypet%d+$") ~= nil
+        or unit:match("^raidpet%d+$") ~= nil
+end
+
+local function HandleBloodlustCast(unit, spellID)
+    if not BLOODLUST_LOOKUP[spellID] then return end
+    if not IsOurGroupCaster(unit) then return end
+
+    local oldLustActive = state.lustActive
+    state.lustActive = true
+    state.lustDuration = LUST_ASSUMED_DURATION
+    state.lustExpiration = GetTime() + LUST_ASSUMED_DURATION
+    lustHasteExpiration = 0
+    lustHastePendingUntil = 0
+
+    if not oldLustActive and PulseCheckDB.sound.lustActive then
+        PlayAlertSound(PulseCheckDB.sound.lustActiveSound, "lustActiveSound")
+    end
+    RefreshLustIcon()
+end
+
 local function OnEvent(self, event, ...)
     if event == "ADDON_LOADED" then
         local name = ...
@@ -1752,11 +1787,13 @@ local function OnEvent(self, event, ...)
 
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
         local unit, _, spellID = ...
-        if unit ~= "player" then return end
-        for _, ex in ipairs(HASTE_EXCLUSIONS) do
-            if ex.cooldown and spellID == ex.cooldown then
-                lastExclusionCast[ex.buff] = GetTime()
-                break
+        HandleBloodlustCast(unit, spellID)
+        if unit == "player" then
+            for _, ex in ipairs(HASTE_EXCLUSIONS) do
+                if ex.cooldown and spellID == ex.cooldown then
+                    lastExclusionCast[ex.buff] = GetTime()
+                    break
+                end
             end
         end
 
@@ -1788,7 +1825,7 @@ eventFrame:SetScript("OnEvent", OnEvent)
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterUnitEvent("UNIT_AURA", "player")
-eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+eventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 eventFrame:RegisterEvent("SPELL_UPDATE_CHARGES")
 eventFrame:RegisterEvent("ENCOUNTER_START")
 eventFrame:RegisterEvent("ENCOUNTER_END")

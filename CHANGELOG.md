@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.0
+
+- Add cast-based bloodlust detection via `UNIT_SPELLCAST_SUCCEEDED` — fires the lust sound and updates the icon in raids/Mythic dungeons where 12.0.5 secret-value restrictions block the aura API, `GetHaste()`, and `GetAuraDataByIndex` (the prior detection paths)
+- Listen to all group members' casts so any shaman/mage/hunter triggering lust now reliably surfaces, regardless of which APIs are tainted
+
 ## 1.6.0
 
 - Fix error when `GetHaste()` returns a secret value under tainted execution in 12.0.5 — haste-delta inference now safely skips the tick instead of throwing on arithmetic
