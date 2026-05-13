@@ -1711,7 +1711,15 @@ end
 
 local function HandleBloodlustCast(unit, spellID)
     if not BLOODLUST_LOOKUP[spellID] then return end
+    -- When the aura API isn't gated by secrets, UpdateBloodlustState is the
+    -- canonical detection path; skipping here avoids overriding correct state
+    -- if the player is ineligible (sated, dead, out of range, etc.).
+    if not useAuraFallback then return end
     if not IsOurGroupCaster(unit) then return end
+    -- Don't override an active sated lockout — the player can't receive lust
+    -- again for 10 minutes after the prior cast, so a group cast we observe is
+    -- landing on others, not us.
+    if state.sated then return end
 
     local oldLustActive = state.lustActive
     state.lustActive = true
