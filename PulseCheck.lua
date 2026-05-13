@@ -141,6 +141,7 @@ local lastExclusionCast  = {}
 local bresPollTicker     = nil
 local raidSatedTicker    = nil
 local useAuraFallback    = false
+local lastZoneTime       = 0
 local frameUnlocked      = false
 local frameSelected      = false
 local settingsDialog     = nil
@@ -625,7 +626,23 @@ local function UpdateBloodlustState()
     end
 
     -- Sound on state transitions
+    local lustSoundFired = false
     if state.lustActive and not oldLustActive and PulseCheckDB.sound.lustActive then
+        PlayAlertSound(PulseCheckDB.sound.lustActiveSound, "lustActiveSound")
+        lustSoundFired = true
+    end
+    -- Fallback: in 12.0.5 raids/M+ the lust aura and cast spellID can both be
+    -- secret, while the sated debuff often is not.  Sated applies at the same
+    -- moment as lust, so a sated→true transition is itself a reliable activation
+    -- signal.  Skip when lustActive transitioned (the canonical path already
+    -- fired) or is currently true (cast handler already fired), and suppress
+    -- briefly after zoning so a stale sated lockout from a prior pull doesn't
+    -- play a phantom alert on the first poll tick after PLAYER_ENTERING_WORLD.
+    if not lustSoundFired
+       and state.sated and not oldSated
+       and not state.lustActive
+       and PulseCheckDB.sound.lustActive
+       and GetTime() - lastZoneTime > 3 then
         PlayAlertSound(PulseCheckDB.sound.lustActiveSound, "lustActiveSound")
     end
     if oldSated and not state.sated and PulseCheckDB.sound.lustReady then
@@ -1721,7 +1738,12 @@ local function IsOurGroupCaster(unit)
 end
 
 local function HandleBloodlustCast(unit, spellID)
-    if not BLOODLUST_LOOKUP[spellID] then return end
+    -- spellID can be a secret value when the cast event fires for a non-player
+    -- unit on a tainted path in 12.0; a direct table index throws "cannot be
+    -- indexed with secret keys".  pcall + rawget mirrors the ScanRaidSated
+    -- pattern above so the lookup degrades to "not a lust spell" safely.
+    local ok, isLust = pcall(rawget, BLOODLUST_LOOKUP, spellID)
+    if not ok or not isLust then return end
     if not IsOurGroupCaster(unit) then return end
     -- Run regardless of useAuraFallback: that flag only updates on
     -- PLAYER_ENTERING_WORLD and via the fallback ticker, so it can be stale
@@ -1777,6 +1799,7 @@ local function OnEvent(self, event, ...)
         self:UnregisterEvent("ADDON_LOADED")
 
     elseif event == "PLAYER_ENTERING_WORLD" then
+        lastZoneTime = GetTime()
         -- Apply preferred LSM sounds once if available (must run here,
         -- not ADDON_LOADED, because LSM sounds aren't registered yet at load time)
         if not PulseCheckDB.lsmDefaultsApplied then

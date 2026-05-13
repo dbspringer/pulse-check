@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.1
+
+- Fix "attempted to index a table that cannot be indexed with secret keys" error fired by `UNIT_SPELLCAST_SUCCEEDED` for non-player units in 12.0.5 raids/M+ — `spellID` can be a secret value for tainted units, so the `BLOODLUST_LOOKUP` table check now uses `pcall(rawget, ...)` (matching the existing `ScanRaidSated` pattern)
+- Add sated-transition→sound trigger as a detection fallback for when both the lust aura and the cast event's `spellID` are secret-gated in 12.0.5 — sated debuff lands at the same moment as lust, so its appearance is a reliable activation signal when the canonical paths can't read the spell
+- Suppress the sated-transition sound for 3 seconds after `PLAYER_ENTERING_WORLD` so zoning into an instance while sated from a prior pull doesn't play a phantom alert
+
 ## 1.7.0
 
 - Add cast-based bloodlust detection via `UNIT_SPELLCAST_SUCCEEDED` — fires the lust sound and updates the icon in raids/Mythic dungeons where 12.0.5 secret-value restrictions block the aura API, `GetHaste()`, and `GetAuraDataByIndex` (the prior detection paths)
