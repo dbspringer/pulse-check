@@ -4,6 +4,8 @@
 
 - Add cast-based bloodlust detection via `UNIT_SPELLCAST_SUCCEEDED` — fires the lust sound and updates the icon in raids/Mythic dungeons where 12.0.5 secret-value restrictions block the aura API, `GetHaste()`, and `GetAuraDataByIndex` (the prior detection paths)
 - Listen to all group members' casts so any shaman/mage/hunter triggering lust now reliably surfaces, regardless of which APIs are tainted
+- Gate cast fallback on `useAuraFallback`, sated lockout, active lust window, and player alive state — only writes lust state when no canonical detection path is available and the player is eligible to receive the buff
+- Known limitation: if the player `/reloads` while sated in raids/M+ with secret values active, in-memory sated state is lost and a subsequent group lust cast can briefly trigger a false alert until the next pull
 
 ## 1.6.0
 

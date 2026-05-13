@@ -1724,6 +1724,9 @@ local function HandleBloodlustCast(unit, spellID)
     -- would push state.lustExpiration forward and shift the inferred sated
     -- lockout that UpdateBloodlustState derives from lustStart later.
     if state.lustActive then return end
+    -- Dead/ghost players don't receive bloodlust — skip to avoid playing the
+    -- alert sound while the player can't act on it anyway.
+    if UnitIsDeadOrGhost("player") then return end
 
     state.lustActive = true
     state.lustDuration = LUST_ASSUMED_DURATION
