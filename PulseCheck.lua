@@ -118,6 +118,7 @@ local state = {
     lustActive           = false,
     lustExpiration       = 0,
     lustDuration         = 0,
+    lustFromCast         = false,
     sated                = false,
     satedExpiration      = 0,
     satedDuration        = 0,
@@ -500,6 +501,7 @@ local function UpdateBloodlustState()
     local oldLustActive = state.lustActive
     local oldLustExpiration = state.lustExpiration
     local oldLustDuration = state.lustDuration
+    local oldLustFromCast = state.lustFromCast
     local oldSated = state.sated
     local oldSatedExpiration = state.satedExpiration
     local oldSatedDuration = state.satedDuration
@@ -507,6 +509,7 @@ local function UpdateBloodlustState()
     state.lustActive = false
     state.lustExpiration = 0
     state.lustDuration = 0
+    state.lustFromCast = false
 
     for _, id in ipairs(BLOODLUST_IDS) do
         local aura = QueryPlayerAura(id)
@@ -528,6 +531,7 @@ local function UpdateBloodlustState()
             state.lustActive = true
             state.lustExpiration = oldLustExpiration
             state.lustDuration = oldLustDuration
+            state.lustFromCast = oldLustFromCast
         elseif lustHasteExpiration > 0 and GetTime() < lustHasteExpiration then
             -- Previously inferred via haste, still within expected duration
             state.lustActive = true
@@ -583,8 +587,12 @@ local function UpdateBloodlustState()
 
     -- Sated fallback: if lust just ended and API can't confirm sated, infer it.
     -- Sated (10 min) starts when lust starts, so expiration = lustStart + 600.
+    -- Skip when the prior lust came from the cast-event path only — that signal
+    -- can't verify the player actually received the buff (e.g. caster was out
+    -- of range), so inferring sated from it risks a 10-minute false lockout
+    -- that suppresses real subsequent lust alerts.
     if oldLustActive and not state.lustActive and not state.sated
-       and oldLustExpiration > 0 then
+       and oldLustExpiration > 0 and not oldLustFromCast then
         local lustStart = oldLustExpiration - (oldLustDuration > 0 and oldLustDuration or LUST_ASSUMED_DURATION)
         local satedExpiration = lustStart + 600
         if GetTime() < satedExpiration then
@@ -1713,24 +1721,25 @@ local function HandleBloodlustCast(unit, spellID)
     if not BLOODLUST_LOOKUP[spellID] then return end
     -- When the aura API isn't gated by secrets, UpdateBloodlustState is the
     -- canonical detection path; skipping here avoids overriding correct state
-    -- if the player is ineligible (sated, dead, out of range, etc.).
+    -- when the player is ineligible (sated, dead, etc.).
     if not useAuraFallback then return end
     if not IsOurGroupCaster(unit) then return end
     -- Don't override an active sated lockout — the player can't receive lust
     -- again for 10 minutes after the prior cast, so a group cast we observe is
     -- landing on others, not us.
     if state.sated then return end
-    -- Already inside the assumed 40s window from a prior cast; a duplicate cast
-    -- would push state.lustExpiration forward and shift the inferred sated
-    -- lockout that UpdateBloodlustState derives from lustStart later.
+    -- Skip while already inside the assumed 40s window to avoid extending the
+    -- inferred sated lockout from a later cast timestamp.
     if state.lustActive then return end
-    -- Dead/ghost players don't receive bloodlust — skip to avoid playing the
-    -- alert sound while the player can't act on it anyway.
+    -- Dead/ghost players don't receive bloodlust.  Note: Spirit of Redemption
+    -- (Holy Priest, 15s after death) still receives it, but UnitIsDeadOrGhost
+    -- returns false in that state so the guard correctly allows it through.
     if UnitIsDeadOrGhost("player") then return end
 
     state.lustActive = true
     state.lustDuration = LUST_ASSUMED_DURATION
     state.lustExpiration = GetTime() + LUST_ASSUMED_DURATION
+    state.lustFromCast = true
     lustHasteExpiration = 0
     lustHastePendingUntil = 0
 
