@@ -33,6 +33,11 @@ for _, id in ipairs(SATED_IDS) do
     SATED_LOOKUP[id] = true
 end
 
+local BLOODLUST_LOOKUP = {}
+for _, id in ipairs(BLOODLUST_IDS) do
+    BLOODLUST_LOOKUP[id] = true
+end
+
 -- Non-lust abilities that can cause large haste spikes (false positives).
 -- Only the initial activation spike is suppressed; subsequent spikes are allowed.
 --   buff     = aura spell ID to check via C_UnitAuras
@@ -113,6 +118,7 @@ local state = {
     lustActive           = false,
     lustExpiration       = 0,
     lustDuration         = 0,
+    lustFromCast         = false,
     sated                = false,
     satedExpiration      = 0,
     satedDuration        = 0,
@@ -491,10 +497,16 @@ local function CanQuerySatedAuras()
     return true
 end
 
+local function ResetLustHasteInference()
+    lustHasteExpiration = 0
+    lustHastePendingUntil = 0
+end
+
 local function UpdateBloodlustState()
     local oldLustActive = state.lustActive
     local oldLustExpiration = state.lustExpiration
     local oldLustDuration = state.lustDuration
+    local oldLustFromCast = state.lustFromCast
     local oldSated = state.sated
     local oldSatedExpiration = state.satedExpiration
     local oldSatedDuration = state.satedDuration
@@ -502,6 +514,7 @@ local function UpdateBloodlustState()
     state.lustActive = false
     state.lustExpiration = 0
     state.lustDuration = 0
+    state.lustFromCast = false
 
     for _, id in ipairs(BLOODLUST_IDS) do
         local aura = QueryPlayerAura(id)
@@ -523,6 +536,7 @@ local function UpdateBloodlustState()
             state.lustActive = true
             state.lustExpiration = oldLustExpiration
             state.lustDuration = oldLustDuration
+            state.lustFromCast = oldLustFromCast
         elseif lustHasteExpiration > 0 and GetTime() < lustHasteExpiration then
             -- Previously inferred via haste, still within expected duration
             state.lustActive = true
@@ -540,8 +554,7 @@ local function UpdateBloodlustState()
         end
     else
         -- Aura API confirmed lust; clear haste inference and any pending state
-        lustHasteExpiration = 0
-        lustHastePendingUntil = 0
+        ResetLustHasteInference()
     end
     if currentHaste then
         lastHaste = currentHaste
@@ -578,8 +591,12 @@ local function UpdateBloodlustState()
 
     -- Sated fallback: if lust just ended and API can't confirm sated, infer it.
     -- Sated (10 min) starts when lust starts, so expiration = lustStart + 600.
+    -- Skip when the prior lust came from the cast-event path only — that signal
+    -- can't verify the player actually received the buff (e.g. caster was out
+    -- of range), so inferring sated from it risks a 10-minute false lockout
+    -- that suppresses real subsequent lust alerts.
     if oldLustActive and not state.lustActive and not state.sated
-       and oldLustExpiration > 0 then
+       and oldLustExpiration > 0 and not oldLustFromCast then
         local lustStart = oldLustExpiration - (oldLustDuration > 0 and oldLustDuration or LUST_ASSUMED_DURATION)
         local satedExpiration = lustStart + 600
         if GetTime() < satedExpiration then
@@ -1389,8 +1406,7 @@ local function UpdateInstancePolling()
         state.raidSated = false
         lastHaste = 0
         peakHaste = 0
-        lustHasteExpiration = 0
-        lustHastePendingUntil = 0
+        ResetLustHasteInference()
         hasteExclusionWasActive = {}
         lastExclusionCast = {}
         UpdateBresState()
@@ -1691,6 +1707,52 @@ SlashCmdList["PULSECHECK"] = HandleSlashCommand
 
 local eventFrame = CreateFrame("Frame")
 
+-- Cast-based lust detection.  In 12.0.5 raids/Mythic dungeons the aura API,
+-- GetHaste(), and GetAuraDataByIndex are all gated behind secret values, so
+-- UpdateBloodlustState has no working path.  Spellcast events aren't subject
+-- to that gating, so a successful bloodlust cast by any group member is the
+-- last reliable signal we have that lust just landed on the player.
+local function IsOurGroupCaster(unit)
+    if unit == "player" or unit == "pet" then return true end
+    if UnitInRaid(unit) or UnitInParty(unit) then return true end
+    -- Pet tokens don't satisfy UnitInRaid/UnitInParty; match explicitly.
+    return unit:match("^partypet%d+$") ~= nil
+        or unit:match("^raidpet%d+$") ~= nil
+end
+
+local function HandleBloodlustCast(unit, spellID)
+    if not BLOODLUST_LOOKUP[spellID] then return end
+    if not IsOurGroupCaster(unit) then return end
+    -- Run regardless of useAuraFallback: that flag only updates on
+    -- PLAYER_ENTERING_WORLD and via the fallback ticker, so it can be stale
+    -- false when secrets activate mid-encounter — the case where the cast
+    -- event is the only working detection path.  When the aura API is genuinely
+    -- working, UpdateBloodlustState will run on UNIT_AURA, set lustFromCast
+    -- back to false, and the duplicate-call guards below prevent double-fire.
+    -- Don't override an active sated lockout — the player can't receive lust
+    -- again for 10 minutes after the prior cast, so a group cast we observe is
+    -- landing on others, not us.
+    if state.sated then return end
+    -- Skip while already inside the assumed 40s window to avoid extending the
+    -- inferred sated lockout from a later cast timestamp.
+    if state.lustActive then return end
+    -- Dead/ghost players don't receive bloodlust.  Note: Spirit of Redemption
+    -- (Holy Priest, 15s after death) still receives it, but UnitIsDeadOrGhost
+    -- returns false in that state so the guard correctly allows it through.
+    if UnitIsDeadOrGhost("player") then return end
+
+    state.lustActive = true
+    state.lustDuration = LUST_ASSUMED_DURATION
+    state.lustExpiration = GetTime() + LUST_ASSUMED_DURATION
+    state.lustFromCast = true
+    ResetLustHasteInference()
+
+    if PulseCheckDB.sound.lustActive then
+        PlayAlertSound(PulseCheckDB.sound.lustActiveSound, "lustActiveSound")
+    end
+    RefreshLustIcon()
+end
+
 local function OnEvent(self, event, ...)
     if event == "ADDON_LOADED" then
         local name = ...
@@ -1752,11 +1814,13 @@ local function OnEvent(self, event, ...)
 
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
         local unit, _, spellID = ...
-        if unit ~= "player" then return end
-        for _, ex in ipairs(HASTE_EXCLUSIONS) do
-            if ex.cooldown and spellID == ex.cooldown then
-                lastExclusionCast[ex.buff] = GetTime()
-                break
+        HandleBloodlustCast(unit, spellID)
+        if unit == "player" then
+            for _, ex in ipairs(HASTE_EXCLUSIONS) do
+                if ex.cooldown and spellID == ex.cooldown then
+                    lastExclusionCast[ex.buff] = GetTime()
+                    break
+                end
             end
         end
 
@@ -1788,7 +1852,7 @@ eventFrame:SetScript("OnEvent", OnEvent)
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterUnitEvent("UNIT_AURA", "player")
-eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+eventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 eventFrame:RegisterEvent("SPELL_UPDATE_CHARGES")
 eventFrame:RegisterEvent("ENCOUNTER_START")
 eventFrame:RegisterEvent("ENCOUNTER_END")

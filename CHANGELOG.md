@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.0
+
+- Add cast-based bloodlust detection via `UNIT_SPELLCAST_SUCCEEDED` — fires the lust sound and updates the icon in raids/Mythic dungeons where 12.0.5 secret-value restrictions block the aura API, `GetHaste()`, and `GetAuraDataByIndex` (the prior detection paths)
+- Listen to all group members' casts so any shaman/mage/hunter triggering lust now reliably surfaces, regardless of which APIs are tainted
+- Gate cast fallback on sated lockout, active lust window, and player alive state — `useAuraFallback` is intentionally *not* checked because that flag only updates on zone-in and the fallback ticker, so it can be stale when secrets activate mid-encounter. Duplicate-call guards prevent double-fires when the aura path also detects the cast
+- Tag cast-inferred lust with `state.lustFromCast` so the existing sated-fallback inference in `UpdateBloodlustState` skips it — prevents a phantom 10-minute sated lockout (from out-of-range or unconfirmed lust) suppressing the next real lust alert
+- Known limitation: if the player `/reloads` while sated in raids/M+ with secret values active, the in-memory sated state is lost and the next group lust cast may briefly play the alert sound. Wait the remaining sated window (~10 min from the original cast) and the next real lust will play correctly
+
 ## 1.6.0
 
 - Fix error when `GetHaste()` returns a secret value under tainted execution in 12.0.5 — haste-delta inference now safely skips the tick instead of throwing on arithmetic
