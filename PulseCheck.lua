@@ -1721,13 +1721,14 @@ local function IsOurGroupCaster(unit)
 end
 
 local function HandleBloodlustCast(unit, spellID)
-    -- When the aura API isn't gated by secrets, UpdateBloodlustState is the
-    -- canonical detection path; skipping here avoids overriding correct state
-    -- when the player is ineligible (sated, dead, etc.).  Check first because
-    -- it short-circuits all non-raid/M+ casts with a single boolean load.
-    if not useAuraFallback then return end
     if not BLOODLUST_LOOKUP[spellID] then return end
     if not IsOurGroupCaster(unit) then return end
+    -- Run regardless of useAuraFallback: that flag only updates on
+    -- PLAYER_ENTERING_WORLD and via the fallback ticker, so it can be stale
+    -- false when secrets activate mid-encounter — the case where the cast
+    -- event is the only working detection path.  When the aura API is genuinely
+    -- working, UpdateBloodlustState will run on UNIT_AURA, set lustFromCast
+    -- back to false, and the duplicate-call guards below prevent double-fire.
     -- Don't override an active sated lockout — the player can't receive lust
     -- again for 10 minutes after the prior cast, so a group cast we observe is
     -- landing on others, not us.
