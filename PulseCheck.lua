@@ -497,6 +497,11 @@ local function CanQuerySatedAuras()
     return true
 end
 
+local function ResetLustHasteInference()
+    lustHasteExpiration = 0
+    lustHastePendingUntil = 0
+end
+
 local function UpdateBloodlustState()
     local oldLustActive = state.lustActive
     local oldLustExpiration = state.lustExpiration
@@ -549,8 +554,7 @@ local function UpdateBloodlustState()
         end
     else
         -- Aura API confirmed lust; clear haste inference and any pending state
-        lustHasteExpiration = 0
-        lustHastePendingUntil = 0
+        ResetLustHasteInference()
     end
     if currentHaste then
         lastHaste = currentHaste
@@ -1402,8 +1406,7 @@ local function UpdateInstancePolling()
         state.raidSated = false
         lastHaste = 0
         peakHaste = 0
-        lustHasteExpiration = 0
-        lustHastePendingUntil = 0
+        ResetLustHasteInference()
         hasteExclusionWasActive = {}
         lastExclusionCast = {}
         UpdateBresState()
@@ -1718,11 +1721,12 @@ local function IsOurGroupCaster(unit)
 end
 
 local function HandleBloodlustCast(unit, spellID)
-    if not BLOODLUST_LOOKUP[spellID] then return end
     -- When the aura API isn't gated by secrets, UpdateBloodlustState is the
     -- canonical detection path; skipping here avoids overriding correct state
-    -- when the player is ineligible (sated, dead, etc.).
+    -- when the player is ineligible (sated, dead, etc.).  Check first because
+    -- it short-circuits all non-raid/M+ casts with a single boolean load.
     if not useAuraFallback then return end
+    if not BLOODLUST_LOOKUP[spellID] then return end
     if not IsOurGroupCaster(unit) then return end
     -- Don't override an active sated lockout — the player can't receive lust
     -- again for 10 minutes after the prior cast, so a group cast we observe is
@@ -1740,8 +1744,7 @@ local function HandleBloodlustCast(unit, spellID)
     state.lustDuration = LUST_ASSUMED_DURATION
     state.lustExpiration = GetTime() + LUST_ASSUMED_DURATION
     state.lustFromCast = true
-    lustHasteExpiration = 0
-    lustHastePendingUntil = 0
+    ResetLustHasteInference()
 
     if PulseCheckDB.sound.lustActive then
         PlayAlertSound(PulseCheckDB.sound.lustActiveSound, "lustActiveSound")
