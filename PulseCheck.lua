@@ -1720,15 +1720,18 @@ local function HandleBloodlustCast(unit, spellID)
     -- again for 10 minutes after the prior cast, so a group cast we observe is
     -- landing on others, not us.
     if state.sated then return end
+    -- Already inside the assumed 40s window from a prior cast; a duplicate cast
+    -- would push state.lustExpiration forward and shift the inferred sated
+    -- lockout that UpdateBloodlustState derives from lustStart later.
+    if state.lustActive then return end
 
-    local oldLustActive = state.lustActive
     state.lustActive = true
     state.lustDuration = LUST_ASSUMED_DURATION
     state.lustExpiration = GetTime() + LUST_ASSUMED_DURATION
     lustHasteExpiration = 0
     lustHastePendingUntil = 0
 
-    if not oldLustActive and PulseCheckDB.sound.lustActive then
+    if PulseCheckDB.sound.lustActive then
         PlayAlertSound(PulseCheckDB.sound.lustActiveSound, "lustActiveSound")
     end
     RefreshLustIcon()
