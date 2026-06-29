@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.2
+
+- Bump Interface to 120007 for patch 12.0.7 — verified compatible, no code changes
+
 ## 1.7.1
 
 - Fix "attempted to index a table that cannot be indexed with secret keys" error fired by `UNIT_SPELLCAST_SUCCEEDED` for non-player units in 12.0.5 raids/M+ — `spellID` can be a secret value for tainted units, so the `BLOODLUST_LOOKUP` table check now uses `pcall(rawget, ...)` (matching the existing `ScanRaidSated` pattern)
