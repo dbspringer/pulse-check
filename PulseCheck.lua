@@ -28,37 +28,14 @@ local BLOODLUST_IDS = {
 
 local SATED_IDS = { 57723, 57724, 80354, 95809, 160455, 264689, 390435 }
 
-local SATED_LOOKUP = {}
-for _, id in ipairs(SATED_IDS) do
-    SATED_LOOKUP[id] = true
-end
-
 local BLOODLUST_LOOKUP = {}
 for _, id in ipairs(BLOODLUST_IDS) do
     BLOODLUST_LOOKUP[id] = true
 end
 
--- Non-lust abilities that can cause large haste spikes (false positives).
--- Only the initial activation spike is suppressed; subsequent spikes are allowed.
---   buff     = aura spell ID to check via C_UnitAuras
---   cooldown = (optional) spell ID to check via C_Spell.GetSpellCooldown
---              when aura API is blocked; must be known by the player (IsPlayerSpell)
---   window   = (optional) seconds after cooldown use to consider active (default 30)
-local HASTE_EXCLUSIONS = {
-    { buff = 431698, cooldown = 370553, window = 30 }, -- Temporal Burst / Tip the Scales (Evoker)
-    { buff = 10060,                     window = 15 }, -- Power Infusion (Priest); no cooldown — cast on any player
-    { buff = 162264, cooldown = 191427, window = 20 }, -- Metamorphosis (Havoc DH)
-    { buff = 12472,  cooldown = 12472,  window = 25 }, -- Icy Veins (Frost Mage)
-    { buff = 231895, cooldown = 231895, window = 27 }, -- Crusade (Ret Paladin)
-    { buff = 382043,                    window = 12 }, -- Surging Elements (Enh Shaman); no cooldown — proc, not cast
-    { buff = 114052, cooldown = 114052, window = 10 }, -- Ascendance (Resto Shaman) / Preeminence
-    { buff = 114050, cooldown = 114050, window = 10 }, -- Ascendance (Ele Shaman) / Preeminence
-}
-
 local BRES_GCD_THRESHOLD    = 2     -- ignore cooldowns at or below GCD length
-local LUST_HASTE_MULTIPLIER = 1.25  -- 25% multiplicative haste increase to infer lust
-local LUST_HASTE_MIN_DELTA  = 20    -- minimum absolute haste increase to infer lust
 local LUST_ASSUMED_DURATION = 40
+local SATED_DURATION        = 600   -- 10 min lockout, applied the moment lust lands
 
 local ICON_SIZE = 48
 local ICON_GAP = 6
@@ -130,17 +107,9 @@ local state = {
     bresActive           = false,
 }
 
-local auraFallbackTicker = nil
 local lustPollTicker     = nil
-local lastHaste          = 0
-local peakHaste          = 0
-local lustHasteExpiration = 0
-local lustHastePendingUntil = 0
-local hasteExclusionWasActive = {}
-local lastExclusionCast  = {}
 local bresPollTicker     = nil
 local raidSatedTicker    = nil
-local useAuraFallback    = false
 local lastZoneTime       = 0
 local frameUnlocked      = false
 local frameSelected      = false
@@ -168,28 +137,31 @@ local function QueryPlayerAura(spellID)
     return C_UnitAuras.GetPlayerAuraBySpellID(spellID)
 end
 
--- Read GetHaste() safely.  Patch 12.0.5 introduced taint on GetHaste() under
--- tainted execution paths; the returned value can be a secret placeholder
--- that blows up any arithmetic or comparison.  Return nil when that happens
--- so callers can skip haste-based inference for this tick.
-local function SafeGetHaste()
-    local ok, haste = pcall(GetHaste)
-    if not ok or haste == nil then return nil end
-    if issecretvalue and issecretvalue(haste) then return nil end
-    return haste
-end
-
 -- Read duration/expiration from an aura, falling back to assumed values when
 -- fields are inaccessible (tainted object) or secret value placeholders (12.0).
+-- The third return reports whether the timing is real.  Callers that do more
+-- than display it must check: the fallback assumes the aura just landed, which
+-- is indistinguishable from a genuinely fresh one and would misdate anything
+-- derived from it.
 local function SafeAuraTimer(aura, fallbackDuration)
     local ok, duration = pcall(rawget, aura, "duration")
     local ok2, expiration = pcall(rawget, aura, "expirationTime")
     if not ok or not ok2
        or (issecretvalue and (issecretvalue(duration) or issecretvalue(expiration)))
        or not duration or not expiration or duration == 0 or expiration == 0 then
-        return fallbackDuration, GetTime() + fallbackDuration
+        return fallbackDuration, GetTime() + fallbackDuration, false
     end
-    return duration, expiration
+    return duration, expiration, true
+end
+
+-- Read a number that a 12.0+ API may have replaced with a secret placeholder.
+-- Returns nil when the value can't be compared or used in arithmetic, so the
+-- caller can hold its previous reading instead of throwing somewhere else.
+-- issecretvalue must come first: comparing a secret is itself the error.
+local function SafeNumber(value)
+    if issecretvalue and issecretvalue(value) then return nil end
+    if type(value) ~= "number" then return nil end
+    return value
 end
 
 local function MergeDefaults(saved, defaults)
@@ -452,57 +424,6 @@ end
 -- Detection Functions
 -- ---------------------------------------------------------------------------
 
--- Returns true if any haste exclusion JUST transitioned from inactive → active.
--- Must be called every tick so state stays current regardless of haste delta.
-local function UpdateHasteExclusions()
-    local newActivation = false
-    local isSecret = C_Secrets and C_Secrets.ShouldSpellAuraBeSecret
-    for _, ex in ipairs(HASTE_EXCLUSIONS) do
-        local active = false
-        if not (isSecret and isSecret(ex.buff)) then
-            -- Normal path: aura check, then cooldown fallback
-            if QueryPlayerAura(ex.buff) then
-                active = true
-            elseif ex.cooldown and IsPlayerSpell(ex.cooldown) then
-                local info = C_Spell.GetSpellCooldown(ex.cooldown)
-                if info and info.startTime and info.startTime > 0 then
-                    active = (GetTime() - info.startTime) <= (ex.window or 30)
-                end
-            end
-        elseif ex.cooldown and lastExclusionCast[ex.buff] then
-            -- Secret path: aura and cooldown data are restricted.
-            -- Fall back to UNIT_SPELLCAST_SUCCEEDED timestamp.
-            active = (GetTime() - lastExclusionCast[ex.buff]) <= (ex.window or 30)
-        end
-        if active and not hasteExclusionWasActive[ex.buff] then
-            newActivation = true
-        end
-        hasteExclusionWasActive[ex.buff] = active
-    end
-    return newActivation
-end
-
--- Returns true if the aura API can query sated IDs without secret-value
--- restrictions.  Used by the sated-gate to distinguish "sated is genuinely
--- absent" from "the API is blocked and we can't tell."
-local function CanQuerySatedAuras()
-    if not C_Secrets or not C_Secrets.ShouldSpellAuraBeSecret then
-        return true  -- pre-12.0 or secrets API unavailable; aura API is open
-    end
-    for _, id in ipairs(SATED_IDS) do
-        local ok, isSecret = pcall(C_Secrets.ShouldSpellAuraBeSecret, id)
-        if not ok or isSecret then
-            return false
-        end
-    end
-    return true
-end
-
-local function ResetLustHasteInference()
-    lustHasteExpiration = 0
-    lustHastePendingUntil = 0
-end
-
 local function UpdateBloodlustState()
     local oldLustActive = state.lustActive
     local oldLustExpiration = state.lustExpiration
@@ -511,6 +432,34 @@ local function UpdateBloodlustState()
     local oldSated = state.sated
     local oldSatedExpiration = state.satedExpiration
     local oldSatedDuration = state.satedDuration
+
+    -- Sated resolves first and anchors everything else.  As of 12.1 the
+    -- Sated/Exhaustion family is flagged never-secret, so it stays readable in
+    -- raid/M+ combat — unlike the Bloodlust buff itself, which does not.
+    state.sated = false
+    state.satedExpiration = 0
+    state.satedDuration = 0
+    local satedTimingTrusted = false
+
+    for _, id in ipairs(SATED_IDS) do
+        local aura = QueryPlayerAura(id)
+        if aura then
+            state.sated = true
+            state.satedDuration, state.satedExpiration, satedTimingTrusted =
+                SafeAuraTimer(aura, SATED_DURATION)
+            break
+        end
+    end
+
+    -- Aura API may return nil during zone transitions.  Validate against the
+    -- known expiration time before trusting a sated→false transition.
+    if oldSated and not state.sated
+       and oldSatedExpiration > 0 and GetTime() < oldSatedExpiration then
+        state.sated = true
+        state.satedExpiration = oldSatedExpiration
+        state.satedDuration = oldSatedDuration
+        satedTimingTrusted = true
+    end
 
     state.lustActive = false
     state.lustExpiration = 0
@@ -526,121 +475,52 @@ local function UpdateBloodlustState()
         end
     end
 
-    -- Fallback: if aura API is blocked, use haste delta to detect lust.
-    -- SafeGetHaste returns nil when the value is a secret placeholder; in that
-    -- case we skip haste inference this tick and preserve prior lastHaste/peakHaste.
-    local currentHaste = SafeGetHaste()
-    local hasteExclusionJustActivated = UpdateHasteExclusions()
-    if not state.lustActive then
-        if oldLustActive and oldLustExpiration > 0 and GetTime() < oldLustExpiration then
-            -- Lust was active and hasn't expired; API is unreliable
+    -- Derive lust from sated when the buff itself is unreadable.  The same
+    -- effect that grants lust applies sated, to exactly the targets that receive
+    -- it, so the sated application time *is* the lust start time.  This covers
+    -- every source uniformly, drums included.  Trusted timing is required: the
+    -- SafeAuraTimer fallback assumes the aura just landed, which would
+    -- resurrect a lust that actually ended minutes ago.
+    if not state.lustActive and state.sated and satedTimingTrusted then
+        local lustStart = state.satedExpiration - state.satedDuration
+        local lustExpiration = lustStart + LUST_ASSUMED_DURATION
+        if GetTime() < lustExpiration then
             state.lustActive = true
-            state.lustExpiration = oldLustExpiration
-            state.lustDuration = oldLustDuration
-            state.lustFromCast = oldLustFromCast
-        elseif lustHasteExpiration > 0 and GetTime() < lustHasteExpiration then
-            -- Previously inferred via haste, still within expected duration
-            state.lustActive = true
-            state.lustExpiration = lustHasteExpiration
+            state.lustExpiration = lustExpiration
             state.lustDuration = LUST_ASSUMED_DURATION
-        elseif lustHastePendingUntil > 0 then
-            -- Pending sated-gate: resolved after sated scan below (no-op here)
-        elseif currentHaste and lastHaste > 0
-               and currentHaste > peakHaste
-               and currentHaste > lastHaste * LUST_HASTE_MULTIPLIER
-               and (currentHaste - lastHaste) >= LUST_HASTE_MIN_DELTA
-               and not hasteExclusionJustActivated then
-            -- Large upward haste spike — enter pending state for sated-gate
-            lustHastePendingUntil = GetTime() + 1
-        end
-    else
-        -- Aura API confirmed lust; clear haste inference and any pending state
-        ResetLustHasteInference()
-    end
-    if currentHaste then
-        lastHaste = currentHaste
-        if oldLustActive and not state.lustActive then
-            -- Lust just ended; reset peak so next lust can be detected
-            peakHaste = currentHaste
-        elseif currentHaste > peakHaste then
-            peakHaste = currentHaste
         end
     end
 
-    state.sated = false
-    state.satedExpiration = 0
-    state.satedDuration = 0
-
-    for _, id in ipairs(SATED_IDS) do
-        local aura = QueryPlayerAura(id)
-        if aura then
-            state.sated = true
-            state.satedDuration, state.satedExpiration = SafeAuraTimer(aura, 600)
-            break
-        end
+    -- Hold a lust already known to be running across a tick that couldn't read
+    -- it (cast-inferred lust has no aura to re-read, so it relies on this).
+    if not state.lustActive
+       and oldLustActive and oldLustExpiration > 0 and GetTime() < oldLustExpiration then
+        state.lustActive = true
+        state.lustExpiration = oldLustExpiration
+        state.lustDuration = oldLustDuration
+        state.lustFromCast = oldLustFromCast
     end
 
-    -- Aura API may return nil during combat (secret values / taint) or zone
-    -- transitions.  Validate against the known expiration time before trusting
-    -- a sated→false transition.
-    if oldSated and not state.sated
-       and oldSatedExpiration > 0 and GetTime() < oldSatedExpiration then
-        state.sated = true
-        state.satedExpiration = oldSatedExpiration
-        state.satedDuration = oldSatedDuration
-    end
-
-    -- Sated fallback: if lust just ended and API can't confirm sated, infer it.
-    -- Sated (10 min) starts when lust starts, so expiration = lustStart + 600.
-    -- Skip when the prior lust came from the cast-event path only — that signal
-    -- can't verify the player actually received the buff (e.g. caster was out
-    -- of range), so inferring sated from it risks a 10-minute false lockout
-    -- that suppresses real subsequent lust alerts.
+    -- Sated fallback: if lust just ended and the API can't confirm sated, infer
+    -- it.  Dormant while sated stays never-secret; kept as insurance against
+    -- reclassification.  Skipped for cast-inferred lust, which can't verify the
+    -- player was in range — a false 10-minute lockout would suppress the next
+    -- real alert.
     if oldLustActive and not state.lustActive and not state.sated
        and oldLustExpiration > 0 and not oldLustFromCast then
         local lustStart = oldLustExpiration - (oldLustDuration > 0 and oldLustDuration or LUST_ASSUMED_DURATION)
-        local satedExpiration = lustStart + 600
+        local satedExpiration = lustStart + SATED_DURATION
         if GetTime() < satedExpiration then
             state.sated = true
             state.satedExpiration = satedExpiration
-            state.satedDuration = 600
+            state.satedDuration = SATED_DURATION
         end
     end
 
-    -- Sated-gate resolution: now that this tick's sated state is known, decide
-    -- whether a pending haste spike is real lust or a false positive.
-    if lustHastePendingUntil > 0 and not state.lustActive then
-        local now = GetTime()
-        if now >= lustHastePendingUntil then
-            if state.sated or useAuraFallback or not CanQuerySatedAuras() then
-                -- Sated detected, lust auras are secret (useAuraFallback), or
-                -- sated auras are secret (CanQuerySatedAuras) — promote.
-                lustHasteExpiration = now + LUST_ASSUMED_DURATION
-                state.lustActive = true
-                state.lustExpiration = lustHasteExpiration
-                state.lustDuration = LUST_ASSUMED_DURATION
-            end
-            -- Either way, pending is resolved (no promotion = false positive discarded)
-            lustHastePendingUntil = 0
-        end
-    end
-
-    -- Sound on state transitions
-    local lustSoundFired = false
-    if state.lustActive and not oldLustActive and PulseCheckDB.sound.lustActive then
-        PlayAlertSound(PulseCheckDB.sound.lustActiveSound, "lustActiveSound")
-        lustSoundFired = true
-    end
-    -- Fallback: in 12.0.5 raids/M+ the lust aura and cast spellID can both be
-    -- secret, while the sated debuff often is not.  Sated applies at the same
-    -- moment as lust, so a sated→true transition is itself a reliable activation
-    -- signal.  Skip when lustActive transitioned (the canonical path already
-    -- fired) or is currently true (cast handler already fired), and suppress
-    -- briefly after zoning so a stale sated lockout from a prior pull doesn't
-    -- play a phantom alert on the first poll tick after PLAYER_ENTERING_WORLD.
-    if not lustSoundFired
-       and state.sated and not oldSated
-       and not state.lustActive
+    -- Sound on state transitions.  Suppress the activation alert briefly after
+    -- zoning: state resets on PLAYER_ENTERING_WORLD, so a lust already running
+    -- when the player reloads mid-pull would otherwise re-announce itself.
+    if state.lustActive and not oldLustActive
        and PulseCheckDB.sound.lustActive
        and GetTime() - lastZoneTime > 3 then
         PlayAlertSound(PulseCheckDB.sound.lustActiveSound, "lustActiveSound")
@@ -652,40 +532,60 @@ local function UpdateBloodlustState()
     return (state.lustActive ~= oldLustActive) or (state.sated ~= oldSated)
 end
 
+-- Keeps every state.bres* field a plain number.  Cooldown structs only mark
+-- maxCharges and isActive NeverSecret, so the rest can arrive as secret values
+-- — and they're consumed far from here: RefreshBresIcon compares them and
+-- BresOnUpdate does arithmetic on them every frame.  Storing a secret would
+-- throw somewhere unrelated, so unreadable data holds the previous reading.
+-- Values are staged in locals so a mid-read bail can't leave state half-written.
 local function UpdateBresState()
     local oldCharges = state.bresCharges
 
     local chargeInfo = C_Spell.GetSpellCharges(BRES_SPELL_ID)
     if chargeInfo then
         -- Encounter charge system active
+        local charges = SafeNumber(chargeInfo.currentCharges)
+        local cooldownStart = SafeNumber(chargeInfo.cooldownStartTime)
+        local cooldownDuration = SafeNumber(chargeInfo.cooldownDuration)
+        if not charges or not cooldownStart or not cooldownDuration then
+            return false
+        end
+
         state.bresActive = true
-        state.bresCharges = chargeInfo.currentCharges
+        state.bresCharges = charges
         state.bresMaxCharges = chargeInfo.maxCharges
-        state.bresCooldownStart = chargeInfo.cooldownStartTime
-        state.bresCooldownDuration = chargeInfo.cooldownDuration
+        state.bresCooldownStart = cooldownStart
+        state.bresCooldownDuration = cooldownDuration
     else
         -- No encounter charges; check personal brez cooldown
-        state.bresActive = false
-        state.bresCharges = 0
-        state.bresMaxCharges = 0
-        state.bresCooldownStart = 0
-        state.bresCooldownDuration = 0
+        local active, maxCharges = false, 0
+        local charges, cooldownStart, cooldownDuration = 0, 0, 0
 
         for _, id in ipairs(BRES_CLASS_SPELLS) do
             if IsPlayerSpell(id) then
-                state.bresActive = true
-                state.bresMaxCharges = 1
+                active = true
+                maxCharges = 1
                 local cooldownInfo = C_Spell.GetSpellCooldown(id)
-                if cooldownInfo and cooldownInfo.duration > BRES_GCD_THRESHOLD then
-                    state.bresCharges = 0
-                    state.bresCooldownStart = cooldownInfo.startTime
-                    state.bresCooldownDuration = cooldownInfo.duration
+                local duration = cooldownInfo and SafeNumber(cooldownInfo.duration)
+                local startTime = cooldownInfo and SafeNumber(cooldownInfo.startTime)
+                if cooldownInfo and not (duration and startTime) then
+                    return false  -- cooldown data is secret; hold what we had
+                elseif duration and duration > BRES_GCD_THRESHOLD then
+                    charges = 0
+                    cooldownStart = startTime
+                    cooldownDuration = duration
                 elseif cooldownInfo then
-                    state.bresCharges = 1
+                    charges = 1
                 end
                 break
             end
         end
+
+        state.bresActive = active
+        state.bresCharges = charges
+        state.bresMaxCharges = maxCharges
+        state.bresCooldownStart = cooldownStart
+        state.bresCooldownDuration = cooldownDuration
     end
 
     if oldCharges > 0 and state.bresCharges < oldCharges and PulseCheckDB.sound.bresUsed then
@@ -710,34 +610,27 @@ local function ScanRaidSated()
         count = GetNumGroupMembers() - 1
     end
 
+    -- Look each sated ID up by spell ID rather than walking the aura index.
+    -- Index/slot/instanceID lookups raise a Lua error when called by an addon
+    -- while auras are secret (12.1); GetUnitAuraBySpellID carries no such
+    -- restriction and the sated family is flagged never-secret, so this keeps
+    -- working through encounters.  pcall guards the call anyway — that
+    -- classification has changed between patches and can change again.
     for i = 1, count do
         local unit = prefix .. i
         if UnitExists(unit) then
-            local index = 1
-            while true do
-                local aura = C_UnitAuras.GetAuraDataByIndex(unit, index, "HARMFUL")
-                if not aura then break end
-                -- aura.spellId can be a secret value in 12.0; pcall the
-                -- table lookup so a tainted field doesn't throw.
-                local ok, found = pcall(rawget, SATED_LOOKUP, aura.spellId)
-                if ok and found then
+            for _, id in ipairs(SATED_IDS) do
+                local ok, aura = pcall(C_UnitAuras.GetUnitAuraBySpellID, unit, id)
+                if not ok then return end
+                if aura then
                     state.raidSated = true
                     return
                 end
-                index = index + 1
             end
         end
     end
 
     state.raidSated = false
-end
-
-local function CheckSecretValues()
-    if C_Secrets and C_Secrets.ShouldSpellAuraBeSecret then
-        useAuraFallback = C_Secrets.ShouldSpellAuraBeSecret(2825)
-    else
-        useAuraFallback = false
-    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -1336,32 +1229,6 @@ end
 -- Polling Tickers
 -- ---------------------------------------------------------------------------
 
-local function StartAuraFallbackTicker()
-    if auraFallbackTicker then return end
-    auraFallbackTicker = C_Timer.NewTicker(0.5, function()
-        -- Re-check if auras are still secret
-        if C_Secrets and C_Secrets.ShouldSpellAuraBeSecret
-           and not C_Secrets.ShouldSpellAuraBeSecret(2825) then
-            useAuraFallback = false
-            auraFallbackTicker:Cancel()
-            auraFallbackTicker = nil
-            -- API is working again; refresh to clear stale fallback timers
-            RefreshAll()
-            return
-        end
-        if UpdateBloodlustState() then
-            RefreshLustIcon()
-        end
-    end)
-end
-
-local function StopAuraFallbackTicker()
-    if auraFallbackTicker then
-        auraFallbackTicker:Cancel()
-        auraFallbackTicker = nil
-    end
-end
-
 local function StartLustPollTicker()
     if lustPollTicker then return end
     lustPollTicker = C_Timer.NewTicker(1, function()
@@ -1421,11 +1288,6 @@ local function UpdateInstancePolling()
         StopBresPollTicker()
         StopRaidSatedTicker()
         state.raidSated = false
-        lastHaste = 0
-        peakHaste = 0
-        ResetLustHasteInference()
-        hasteExclusionWasActive = {}
-        lastExclusionCast = {}
         UpdateBresState()
         RefreshBresIcon()
     end
@@ -1724,11 +1586,10 @@ SlashCmdList["PULSECHECK"] = HandleSlashCommand
 
 local eventFrame = CreateFrame("Frame")
 
--- Cast-based lust detection.  In 12.0.5 raids/Mythic dungeons the aura API,
--- GetHaste(), and GetAuraDataByIndex are all gated behind secret values, so
--- UpdateBloodlustState has no working path.  Spellcast events aren't subject
--- to that gating, so a successful bloodlust cast by any group member is the
--- last reliable signal we have that lust just landed on the player.
+-- Cast-based lust detection.  Sated-anchored detection covers this today, but
+-- the never-secret classification is set per patch and has already changed
+-- twice.  Spellcast events aren't subject to aura gating at all, so a lust cast
+-- by any group member remains a working signal if Sated is ever re-secreted.
 local function IsOurGroupCaster(unit)
     if unit == "player" or unit == "pet" then return true end
     if UnitInRaid(unit) or UnitInParty(unit) then return true end
@@ -1745,12 +1606,8 @@ local function HandleBloodlustCast(unit, spellID)
     local ok, isLust = pcall(rawget, BLOODLUST_LOOKUP, spellID)
     if not ok or not isLust then return end
     if not IsOurGroupCaster(unit) then return end
-    -- Run regardless of useAuraFallback: that flag only updates on
-    -- PLAYER_ENTERING_WORLD and via the fallback ticker, so it can be stale
-    -- false when secrets activate mid-encounter — the case where the cast
-    -- event is the only working detection path.  When the aura API is genuinely
-    -- working, UpdateBloodlustState will run on UNIT_AURA, set lustFromCast
-    -- back to false, and the duplicate-call guards below prevent double-fire.
+    -- When the aura path is working, UpdateBloodlustState runs on UNIT_AURA and
+    -- sets lustFromCast back to false; the guards below prevent a double-fire.
     -- Don't override an active sated lockout — the player can't receive lust
     -- again for 10 minutes after the prior cast, so a group cast we observe is
     -- landing on others, not us.
@@ -1767,7 +1624,6 @@ local function HandleBloodlustCast(unit, spellID)
     state.lustDuration = LUST_ASSUMED_DURATION
     state.lustExpiration = GetTime() + LUST_ASSUMED_DURATION
     state.lustFromCast = true
-    ResetLustHasteInference()
 
     if PulseCheckDB.sound.lustActive then
         PlayAlertSound(PulseCheckDB.sound.lustActiveSound, "lustActiveSound")
@@ -1819,33 +1675,19 @@ local function OnEvent(self, event, ...)
             end
         end
 
-        CheckSecretValues()
-        if useAuraFallback then
-            StartAuraFallbackTicker()
-        end
         UpdateInstancePolling()
         RefreshAll()
 
     elseif event == "UNIT_AURA" then
         local unit = ...
         if unit ~= "player" then return end
-        if not useAuraFallback then
-            if UpdateBloodlustState() then
-                RefreshLustIcon()
-            end
+        if UpdateBloodlustState() then
+            RefreshLustIcon()
         end
 
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
         local unit, _, spellID = ...
         HandleBloodlustCast(unit, spellID)
-        if unit == "player" then
-            for _, ex in ipairs(HASTE_EXCLUSIONS) do
-                if ex.cooldown and spellID == ex.cooldown then
-                    lastExclusionCast[ex.buff] = GetTime()
-                    break
-                end
-            end
-        end
 
     elseif event == "SPELL_UPDATE_CHARGES" then
         UpdateBresState()
@@ -1855,11 +1697,6 @@ local function OnEvent(self, event, ...)
         RefreshAll()
 
     elseif event == "ENCOUNTER_END" or event == "CHALLENGE_MODE_COMPLETED" then
-        -- Reset haste baselines so stale values from this encounter can't trip
-        -- a false spike on the next one (especially after long tainted windows
-        -- where SafeGetHaste returned nil and baselines froze).
-        lastHaste = 0
-        peakHaste = 0
         state.raidSated = false
         RefreshAll()
 
