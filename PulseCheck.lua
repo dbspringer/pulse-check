@@ -99,6 +99,7 @@ local state = {
     sated                = false,
     satedExpiration      = 0,
     satedDuration        = 0,
+    satedTimingTrusted   = false,
     raidSated            = false,
     bresCharges          = 0,
     bresMaxCharges       = 0,
@@ -432,6 +433,7 @@ local function UpdateBloodlustState()
     local oldSated = state.sated
     local oldSatedExpiration = state.satedExpiration
     local oldSatedDuration = state.satedDuration
+    local oldSatedTrusted = state.satedTimingTrusted
 
     -- Sated resolves first and anchors everything else.  As of 12.1 the
     -- Sated/Exhaustion family is flagged never-secret, so it stays readable in
@@ -458,8 +460,10 @@ local function UpdateBloodlustState()
         state.sated = true
         state.satedExpiration = oldSatedExpiration
         state.satedDuration = oldSatedDuration
-        satedTimingTrusted = true
+        satedTimingTrusted = oldSatedTrusted
     end
+
+    state.satedTimingTrusted = satedTimingTrusted
 
     state.lustActive = false
     state.lustExpiration = 0
@@ -514,6 +518,7 @@ local function UpdateBloodlustState()
             state.sated = true
             state.satedExpiration = satedExpiration
             state.satedDuration = SATED_DURATION
+            state.satedTimingTrusted = false
         end
     end
 
@@ -535,11 +540,17 @@ end
 -- Keeps every state.bres* field a plain number.  Cooldown structs only mark
 -- maxCharges and isActive NeverSecret, so the rest can arrive as secret values
 -- — and they're consumed far from here: RefreshBresIcon compares them and
--- BresOnUpdate does arithmetic on them every frame.  Storing a secret would
--- throw somewhere unrelated, so unreadable data holds the previous reading.
--- Values are staged in locals so a mid-read bail can't leave state half-written.
+-- BresOnUpdate does arithmetic on them every frame, where a secret would throw
+-- with a traceback pointing somewhere innocent.
+--
+-- Unreadable data reports no charges rather than keeping the last reading.
+-- Holding looks harmless but isn't: the retained value can describe a different
+-- context entirely (a personal cooldown from before the encounter began), so
+-- the icon ends up confidently glowing a brez that doesn't exist.  Under-
+-- reporting sends someone to check; over-reporting loses the pull.
 local function UpdateBresState()
     local oldCharges = state.bresCharges
+    local chargesKnown = true
 
     local chargeInfo = C_Spell.GetSpellCharges(BRES_SPELL_ID)
     if chargeInfo then
@@ -547,15 +558,19 @@ local function UpdateBresState()
         local charges = SafeNumber(chargeInfo.currentCharges)
         local cooldownStart = SafeNumber(chargeInfo.cooldownStartTime)
         local cooldownDuration = SafeNumber(chargeInfo.cooldownDuration)
-        if not charges or not cooldownStart or not cooldownDuration then
-            return false
-        end
 
         state.bresActive = true
-        state.bresCharges = charges
-        state.bresMaxCharges = chargeInfo.maxCharges
-        state.bresCooldownStart = cooldownStart
-        state.bresCooldownDuration = cooldownDuration
+        state.bresMaxCharges = SafeNumber(chargeInfo.maxCharges) or 0
+        if charges and cooldownStart and cooldownDuration then
+            state.bresCharges = charges
+            state.bresCooldownStart = cooldownStart
+            state.bresCooldownDuration = cooldownDuration
+        else
+            chargesKnown = false
+            state.bresCharges = 0
+            state.bresCooldownStart = 0
+            state.bresCooldownDuration = 0
+        end
     else
         -- No encounter charges; check personal brez cooldown
         local active, maxCharges = false, 0
@@ -569,7 +584,7 @@ local function UpdateBresState()
                 local duration = cooldownInfo and SafeNumber(cooldownInfo.duration)
                 local startTime = cooldownInfo and SafeNumber(cooldownInfo.startTime)
                 if cooldownInfo and not (duration and startTime) then
-                    return false  -- cooldown data is secret; hold what we had
+                    chargesKnown = false  -- cooldown unreadable; report not ready
                 elseif duration and duration > BRES_GCD_THRESHOLD then
                     charges = 0
                     cooldownStart = startTime
@@ -588,7 +603,12 @@ local function UpdateBresState()
         state.bresCooldownDuration = cooldownDuration
     end
 
-    if oldCharges > 0 and state.bresCharges < oldCharges and PulseCheckDB.sound.bresUsed then
+    -- Only alert on a drop between two readable samples.  A drop to or from the
+    -- unreadable placeholder isn't a resurrection, and announcing one would be
+    -- worse than staying quiet.  The cost is that a brez spent entirely inside a
+    -- blind window goes unannounced.
+    if chargesKnown and oldCharges > 0 and state.bresCharges < oldCharges
+       and PulseCheckDB.sound.bresUsed then
         PlayAlertSound(PulseCheckDB.sound.bresUsedSound, "bresUsedSound")
     end
 

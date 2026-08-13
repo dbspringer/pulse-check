@@ -92,7 +92,11 @@ lustStart = satedExpiration - satedDuration
 
 Cooldown structs can carry secrets too: `SpellChargeInfo` marks only `maxCharges` and `isActive` as `NeverSecret`, so `currentCharges`, `cooldownStartTime` and `cooldownDuration` may be secret values. These don't throw on read — they throw on the *comparison or arithmetic* that happens later, often in a different function, which makes the traceback point somewhere innocent.
 
-The rule: **sanitize at the read site, never store a secret in `state`.** `SafeNumber()` returns nil for anything unusable, and `UpdateBresState` stages values in locals so a mid-read bail can't leave `state` half-written — it holds the previous reading instead. `RefreshBresIcon` and `BresOnUpdate` then rely on `state.bres*` always being plain numbers.
+The rule: **sanitize at the read site, never store a secret in `state`.** `SafeNumber()` returns nil for anything unusable, and `RefreshBresIcon`/`BresOnUpdate` rely on `state.bres*` always being plain numbers.
+
+**Fail closed, not stale.** When data is unreadable, report nothing rather than keeping the last reading. A retained value can describe a different context entirely — hold a personal brez cooldown into an encounter and the icon confidently shows a charge that doesn't exist. Under-reporting sends someone to check; over-reporting loses the pull. Transition alerts must also be suppressed across an unreadable window, since a drop to or from the placeholder isn't a real event.
+
+The same applies to derived timing: a value reconstructed from a fallback is not evidence. `SafeAuraTimer` returns a trust flag, and that provenance is stored in `state.satedTimingTrusted` so it survives a tick where the aura read fails — otherwise the retain path launders assumed timing into trusted and derives a phantom lust from it.
 
 Assume any numeric API can go secret in a future patch: `GetHaste()` was fine in 12.0.0 and returned secrets by 12.0.5, which is what eventually killed the haste-delta detection path entirely.
 
