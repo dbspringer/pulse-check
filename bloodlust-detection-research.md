@@ -44,7 +44,7 @@ During encounters, all class brez spells consume charges from the shared encount
 | Thunderous Drums            | 444257  | TWW drums                       |
 | Void-touched Drums          | 1243972 | Midnight drums (12.0)           |
 
-Note: Drums give 15% haste (not 30%), so the haste-delta fallback (≥25% threshold) will **not** detect them. Detection relies entirely on the aura API or time-based expiration validation.
+Note: Drums give 15% haste (not 30%), which is why the retired haste-delta approach could never detect them. Sated-anchored detection covers them like any other source, because drums apply the same lockout debuff.
 
 ### Sated / Lockout Debuffs (10 min duration)
 
@@ -85,54 +85,37 @@ end
 
 This is the cleanest method and works perfectly outside tainted execution paths.
 
-## Approach 2: Haste Delta Detection
+## Approach 2: Haste Delta Detection (RETIRED)
 
-`GetHaste()` returns the player's total haste percentage and is **not** restricted by secret values. A 25% *multiplicative* increase (`currentHaste > lastHaste * 1.25`) strongly suggests bloodlust was applied. Since WoW haste stacks multiplicatively, the 30% lust buff always produces at least a 30% scaling factor — well above the 25% threshold. Single trinket procs (typically 15-20% multiplicative) cannot reach it alone. Fires unconditionally as a safety net — the multiplicative threshold is the protection against false positives, not a gate on when the API is blocked (combat taint can block the API even when secret values are not detected).
+Inferred lust from a ≥25% multiplicative haste spike (`currentHaste > lastHaste * 1.25`) with an assumed 40s duration. **Removed in 1.8.0.** Recorded here because the reasons it failed are worth not repeating:
+
+- **The premise expired.** This approach existed because `GetHaste()` was unrestricted by secret values. That stopped being true in 12.0.5, when player stat APIs began returning secrets whenever auras are secret — exactly the situation the fallback was for. It was dormant from then on.
+- **It could not see drums.** At 15% haste they sit below any threshold high enough to exclude trinket procs. No amount of tuning fixes that; the signal genuinely isn't there.
+- **It needed a growing exclusion list.** Power Infusion, Metamorphosis, Icy Veins, Crusade, Surging Elements, Ascendance — eight entries by the end, each one a class ability that happened to spike haste, each needing its own aura/cooldown/cast detection to suppress. Every expansion would add more.
+
+The general lesson: a heuristic keyed on a *side effect* (haste) needs constant maintenance to distinguish it from everything else producing that side effect. Keying on a *co-applied marker* (sated) needs none, because nothing else applies it.
+
+## Approach 3: Sated-Anchored Detection (PulseCheck's Solution for 12.1+)
+
+Since 12.1 the Sated/Exhaustion family is flagged **never-secret** while the Bloodlust buff is **not**. That asymmetry is the whole design.
+
+Sated is applied by the same effect that grants lust, to exactly the targets that receive it, so `sated present ⟺ the player got lust`. And because the aura carries real timing even in an encounter, the lust window is *derived* rather than estimated:
 
 ```lua
-local LUST_HASTE_MULTIPLIER = 1.25
-local LUST_ASSUMED_DURATION = 40
-local lastHaste = 0
-local lustHasteExpiration = 0
-
--- Called on a 1s poll ticker:
-local currentHaste = GetHaste()
-if not state.lustActive then
-    if lustHasteExpiration > 0 and GetTime() < lustHasteExpiration then
-        -- Previously inferred via haste, still within expected duration
-        state.lustActive = true
-        state.lustExpiration = lustHasteExpiration
-        state.lustDuration = LUST_ASSUMED_DURATION
-    elseif lastHaste > 0
-           and currentHaste > lastHaste * LUST_HASTE_MULTIPLIER then
-        -- Large haste spike — infer lust activation
-        lustHasteExpiration = GetTime() + LUST_ASSUMED_DURATION
-        state.lustActive = true
-        state.lustExpiration = lustHasteExpiration
-        state.lustDuration = LUST_ASSUMED_DURATION
-    end
-else
-    -- Aura API confirmed lust; clear haste inference
-    lustHasteExpiration = 0
-end
-lastHaste = currentHaste
+local lustStart      = satedExpiration - satedDuration
+local lustExpiration = lustStart + LUST_ASSUMED_DURATION
 ```
 
-**Pros:** Not affected by secret value restrictions. Self-clears when aura API resumes working.
+Layers, in priority order:
 
-**Cons:** Heuristic — cannot detect sated (no haste change). Expiration time is estimated (assumes 40s). Requires polling (not event-driven).
+1. **Aura API** — `C_UnitAuras.GetPlayerAuraBySpellID` over the lust IDs. Exact when readable.
+2. **Sated derivation** — the above. Covers every source uniformly, drums included.
+3. **Time-based retain** (Approach 4) — hold a known-active lust across a tick that couldn't read it.
+4. **Cast events** — `UNIT_SPELLCAST_SUCCEEDED`, in case Sated is ever re-classified as secret.
 
-## Approach 3: Layered Detection (PulseCheck's Solution for 12.0+)
+**Layers 2-4 only apply while the buff is unreadable.** Where the aura API answers honestly, a nil lookup is proof of absence and must win: sated outlives a buff that was cancelled, purged, or dropped on death, and inferring from it there shows a countdown for something the player doesn't have. `LustAuraReadable()` gates this, checking the whole lust ID set since secrecy is decided per spell.
 
-Three detection layers, checked in priority order:
-
-1. **Aura API** — `C_UnitAuras.GetPlayerAuraBySpellID` for all known lust/sated spell IDs. Fastest and most accurate when it works.
-2. **Time-based expiration validation** (Approach 4) — if a buff/debuff was previously detected and hasn't expired, keep it active even if the API returns nil. Handles both combat taint and zone transitions.
-3. **Haste delta** (Approach 2) — `GetHaste()` is unrestricted; a ≥25% spike infers lust activation with a 40s estimated timer. Handles the case where the aura API is blocked from the start and lust is never detected via spell IDs.
-
-All three run inside `UpdateBloodlustState()`, called both by `UNIT_AURA` events (fast path) and a 1s `C_Timer.NewTicker` (safety net in instanced content).
-
-~~Optionally use `COMBAT_LOG_EVENT_UNFILTERED` with `SPELL_AURA_APPLIED`~~ — **this is no longer viable in 12.0**. `COMBAT_LOG_EVENT_UNFILTERED` is a protected event; registering for it triggers `ADDON_ACTION_FORBIDDEN`.
+~~Optionally use `COMBAT_LOG_EVENT_UNFILTERED` with `SPELL_AURA_APPLIED`~~ — **not viable since 12.0**. It is a protected event; registering for it triggers `ADDON_ACTION_FORBIDDEN`.
 
 ## Approach 4: Time-Based Expiration Validation
 
@@ -159,24 +142,35 @@ end
 
 **Pros:** No protected event registration, no heuristics, deterministic. Covers both combat taint and zone transitions.
 
-**Cons:** If a lust buff is removed early (e.g., Soothe), the addon won't detect the removal until the original timer expires or the aura API starts returning data again. Sated debuffs cannot be dispelled and persist through death — only encounter reset clears them — so the time-based override is safe for sated.
+**Cons:** If a lust buff is removed early (cancelled, purged, lost on death), the retain path won't notice until the original timer expires. This is why layers 2-4 are gated on the buff being unreadable — where the API answers, an early removal is observed directly and the retain must not override it.
+
+Sated cannot be dispelled and **persists through death**, which is the trap: a dead player has no lust but still has sated, so any inference from sated must also check `UnitIsDeadOrGhost`. (Spirit of Redemption reports not-dead, so Holy Priests correctly keep theirs.) Only encounter reset clears sated, so the time-based retain is safe for sated itself.
 
 ### Checking if auras are restricted
 
 ```lua
--- 12.0+ API to check if a spell's aura data is secret
+-- Per spell. This is the one to use: secrecy is decided spell by spell.
 if C_Secrets and C_Secrets.ShouldSpellAuraBeSecret then
-    local isSecret = C_Secrets.ShouldSpellAuraBeSecret(57724)
-    -- If true, fall back to timer or haste-delta approach
+    local isSecret = C_Secrets.ShouldSpellAuraBeSecret(2825)   -- Bloodlust
+    -- If true, the aura is unreadable and inference is warranted.
+    -- If false, a nil lookup means genuinely absent -- do not infer over it.
 end
+
+-- Global. True in every encounter, so it is TOO BLUNT to gate a specific
+-- spell: never-secret spells stay readable while this reports true.
+local anySecret = C_Secrets.ShouldAurasBeSecret()
 ```
+
+Measured in a live 12.1 encounter: `ShouldAurasBeSecret()` = true, `ShouldSpellAuraBeSecret(2825)` = true, `ShouldSpellAuraBeSecret(57724)` = false.
 
 ## 12.0 (Midnight) Secret Values Context
 
 Patch 12.0 introduced "secret values" — aura and cooldown fields can be marked protected on tainted execution paths. This affects `C_UnitAuras`, `C_Spell`, and `C_ActionBar` APIs.
 
-- Bloodlust/sated spell IDs are **not explicitly confirmed whitelisted** as of this writing
-- Blizzard is whitelisting spells on a case-by-case basis (devs can request additions)
+- Secrecy is per spell: auras are secret by default during combat, encounters, challenge mode and PvP, but individual spells carry never-secret / always-secret flags that override that
+- **Sated/Exhaustion (all seven IDs) are never-secret; Bloodlust/Heroism is not.** Confirmed in a live 12.1 encounter
+- **The classification list changes between patches.** 12.1 shipped by removing healer buffs and HoTs from the never-secret list, then Blizzard walked that back and added Sated. Probe at runtime; never hardcode the assumption
+- Index, slot, and auraInstanceID lookups **raise a Lua error** when called while auras are secret (12.1). Spell ID and spell name lookups stay callable — `C_UnitAuras.GetUnitAuraBySpellID` is the only safe way to read another unit's auras
 - `C_Secrets.ShouldSpellAuraBeSecret()` and `C_Secrets.ShouldUnitAuraInstanceBeSecret()` let addons check restriction status at runtime
 - Traditional `UNIT_AURA` event registration can cause taint in restricted contexts — polling is safer
 - `COMBAT_LOG_EVENT_UNFILTERED` is a **protected event** — registering for it triggers `ADDON_ACTION_FORBIDDEN`; do not use CLEU as a fallback detection path
@@ -186,10 +180,13 @@ Patch 12.0 introduced "secret values" — aura and cooldown fields can be marked
 | API | Purpose |
 | --- | ------- |
 | `C_UnitAuras.GetPlayerAuraBySpellID(id)` | Check for a specific aura on the player by spell ID |
-| `AuraUtil.ForEachAura(unit, filter, max, func)` | Iterate all auras on a unit |
+| `C_UnitAuras.GetUnitAuraBySpellID(unit, id)` | Same for another unit. Callable while tainted — the only safe cross-unit read in 12.1 |
+| `C_UnitAuras.GetAuraDataByIndex(unit, i, filter)` | **Raises a Lua error** while auras are secret (12.1). Do not use |
+| `AuraUtil.ForEachAura(unit, filter, max, func)` | Iterates by index/slot underneath, so it inherits the same 12.1 error. Avoid |
 | `AuraUtil.FindAuraByName(name, unit)` | Find aura by name (localized — fragile) |
-| `GetHaste()` | Player's current haste % (unrestricted) |
-| `C_Secrets.ShouldSpellAuraBeSecret(id)` | Check if aura data is protected (12.0+) |
+| `GetHaste()` | Player's current haste %. Returns a secret whenever auras are secret (12.0.5+) |
+| `C_Secrets.ShouldSpellAuraBeSecret(id)` | Is this spell's aura data protected? Per spell (12.0+) |
+| `C_Secrets.ShouldAurasBeSecret()` | Are auras generally secret? Global — too blunt to gate a specific spell |
 | `UNIT_AURA` event | Fires on aura gain/loss (may taint in 12.0+) |
 | `COMBAT_LOG_EVENT_UNFILTERED` | **Protected in 12.0** — cannot be registered by addons |
 | `InCombatLockdown()` | Check if player is in combat (tainted execution path) |

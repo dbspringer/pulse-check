@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.8.0
+
+- Fix `GetAuraDataByIndex(): Auras cannot be accessed when secret while tainted by 'PulseCheck'` in 12.1 — the patch made aura lookups by index, slot, or aura instance ID raise a Lua error when an addon calls them while auras are secret, so the 3-second raid-sated scan threw on every tick in raid/M+ combat. The scan now looks each sated ID up with `C_UnitAuras.GetUnitAuraBySpellID`, which carries no such restriction, so it keeps working *through* encounters rather than merely avoiding the crash
+- Detect bloodlust from the Sated debuff instead of haste spikes. Blizzard flagged the Sated/Exhaustion family never-secret (the Bloodlust buff itself is still secret), and sated is applied by the same effect that grants lust, to exactly the targets that receive it — so its application time is the lust start time. Lust timing is now derived rather than inferred:
+  - **Drums are detected.** Their 15% haste sat below the old 25% inference threshold, so they only ever showed up when the aura API was readable
+  - **No false positives.** The 8-entry haste exclusion list for Power Infusion, Icy Veins, Crusade, Ascendance and friends is gone — nothing but a bloodlust effect applies sated
+  - **Reloading mid-encounter is correct.** A sated debuff applied nine minutes ago now resolves to "lust long over" instead of firing a phantom alert, fixing the 1.7.0 known limitation
+  - The activation alert now also drives the icon glow and countdown; previously the sated-transition fallback fired the sound alone
+- Only infer lust where the Bloodlust buff is actually unreadable. Secrecy is decided per spell, so out of combat a nil lookup is proof of absence rather than a blocked read — sated outlives a buff that was cancelled, purged, or lost on death, and inferring from it there showed a countdown for something the player didn't have. Dead players derive no lust either (Spirit of Redemption still counts as alive)
+- Fix a false "brez used" alert when the encounter charge pool gives way to a personal cooldown at `ENCOUNTER_END`. The charge count was compared across that boundary, so any charges still remaining read as a resurrection. Alerts now fire only between two samples from the same source. **Pre-existing before 1.8.0**, surfaced while reviewing the changes above
+- Remove the haste-delta inference and its supporting machinery (`HASTE_EXCLUSIONS`, `SafeGetHaste`, haste baselines, the pending sated-gate). It had been dormant since 12.0.5, when `GetHaste()` began returning secrets whenever auras are secret
+- Fix `UNIT_AURA` updates being skipped in raid combat — the handler was gated on `useAuraFallback`, which is derived from Bloodlust's secrecy and is therefore true in every encounter. That suppressed the event precisely when it carried a readable sated update. The flag and its polling ticker are removed
+- Harden battle res tracking against secret cooldown values — `SpellChargeInfo` marks only `maxCharges` and `isActive` never-secret, so `currentCharges`, `cooldownStartTime` and `cooldownDuration` can arrive as secrets that throw on the comparisons in `UpdateBresState`/`RefreshBresIcon` and the per-frame arithmetic in `BresOnUpdate`. These now go through `SafeNumber`, and unreadable data reports no charges rather than keeping the last reading — a retained value can describe a different context entirely (a personal cooldown from before the encounter began), which would leave the icon glowing a brez that doesn't exist. The used-alert only fires between two readable samples, so a brez spent inside a blind window goes unannounced instead of alerting late. Pre-emptive: no such error has been reported
+- Bump Interface to 120100 for patch 12.1
+
+Cast-based detection is retained as a fallback: the never-secret classification is set per patch and has already changed twice, so if Sated is ever re-secreted, lust detection degrades to the cast path rather than stopping.
+
 ## 1.7.2
 
 - Bump Interface to 120007 for patch 12.0.7 — verified compatible, no code changes
