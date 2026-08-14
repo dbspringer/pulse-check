@@ -96,7 +96,18 @@ The rule: **sanitize at the read site, never store a secret in `state`.** `SafeN
 
 **Fail closed, not stale.** When data is unreadable, report nothing rather than keeping the last reading. A retained value can describe a different context entirely — hold a personal brez cooldown into an encounter and the icon confidently shows a charge that doesn't exist. Under-reporting sends someone to check; over-reporting loses the pull. Transition alerts must also be suppressed across an unreadable window, since a drop to or from the placeholder isn't a real event.
 
-The same applies to derived timing: a value reconstructed from a fallback is not evidence. `SafeAuraTimer` returns a trust flag, and that provenance is stored in `state.satedTimingTrusted` so it survives a tick where the aura read fails — otherwise the retain path launders assumed timing into trusted and derives a phantom lust from it.
+### Inference Must Not Outlive Its Warrant
+
+Most bugs in this addon's history are one mistake in different clothes: a value inferred under some condition keeps being trusted after that condition stops holding. Secret values made it common, because so much of the logic now runs on indirect evidence.
+
+**Tag every inference with its basis, then re-check the basis rather than the value.**
+
+- **Direct observation beats inference, always.** The lust inference paths are gated on `LustAuraReadable()`: where the aura API answers honestly, a nil lookup means absent, and no amount of corroborating evidence may override it. Sated outlives a buff that was cancelled, purged, or dropped on death.
+- **Provenance travels with the value.** `SafeAuraTimer` returns a trust flag, stored in `state.satedTimingTrusted` so it survives a tick where the read fails. Without that, the retain path launders assumed timing into trusted and derives a phantom lust from it.
+- **Only compare commensurable samples.** Battle res tracks `state.bresSource`, because a count from the encounter pool and a count from a personal cooldown aren't the same measurement. Comparing across that switch reported a resurrection that never happened.
+- **Fail closed, not stale** (above) is the same rule for the case where there's no basis at all.
+
+When adding a fallback, ask what makes it valid and what would end that validity. Without an answer to the second, the fallback will eventually lie.
 
 Assume any numeric API can go secret in a future patch: `GetHaste()` was fine in 12.0.0 and returned secrets by 12.0.5, which is what eventually killed the haste-delta detection path entirely.
 

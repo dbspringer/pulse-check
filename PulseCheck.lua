@@ -106,6 +106,7 @@ local state = {
     bresCooldownStart    = 0,
     bresCooldownDuration = 0,
     bresActive           = false,
+    bresSource           = "none",
 }
 
 local lustPollTicker     = nil
@@ -425,6 +426,19 @@ end
 -- Detection Functions
 -- ---------------------------------------------------------------------------
 
+-- True when a nil result from the Bloodlust lookups means the buff is genuinely
+-- absent rather than unreadable.  Secrecy is decided per spell, so the whole set
+-- has to be clear: one restricted source makes absence ambiguous for all of
+-- them.  Callers use this to keep inference from overriding a real observation.
+local function LustAuraReadable()
+    if not C_Secrets or not C_Secrets.ShouldSpellAuraBeSecret then return true end
+    for _, id in ipairs(BLOODLUST_IDS) do
+        local ok, isSecret = pcall(C_Secrets.ShouldSpellAuraBeSecret, id)
+        if not ok or isSecret then return false end
+    end
+    return true
+end
+
 local function UpdateBloodlustState()
     local oldLustActive = state.lustActive
     local oldLustExpiration = state.lustExpiration
@@ -479,13 +493,24 @@ local function UpdateBloodlustState()
         end
     end
 
-    -- Derive lust from sated when the buff itself is unreadable.  The same
-    -- effect that grants lust applies sated, to exactly the targets that receive
-    -- it, so the sated application time *is* the lust start time.  This covers
-    -- every source uniformly, drums included.  Trusted timing is required: the
-    -- SafeAuraTimer fallback assumes the aura just landed, which would
-    -- resurrect a lust that actually ended minutes ago.
-    if not state.lustActive and state.sated and satedTimingTrusted then
+    -- Everything below infers lust from something other than the buff, so it
+    -- only applies while the buff is unreadable.  Where the aura API answers
+    -- honestly, a nil lookup is evidence of absence and must win: sated outlives
+    -- a buff that was cancelled, purged, or lost on death, and inferring from it
+    -- there would show a countdown for something the player doesn't have.
+    -- Dead players have no lust regardless (Spirit of Redemption reports
+    -- not-dead, so Holy Priests keep theirs).
+    local mayInfer = not state.lustActive
+                     and (state.sated or oldLustActive)
+                     and not UnitIsDeadOrGhost("player")
+                     and not LustAuraReadable()
+
+    -- Sated is applied by the same effect that grants lust, to exactly the
+    -- targets that receive it, so its application time *is* the lust start time.
+    -- Covers every source uniformly, drums included.  Trusted timing is
+    -- required: the SafeAuraTimer fallback assumes the aura just landed, which
+    -- would resurrect a lust that actually ended minutes ago.
+    if mayInfer and state.sated and satedTimingTrusted then
         local lustStart = state.satedExpiration - state.satedDuration
         local lustExpiration = lustStart + LUST_ASSUMED_DURATION
         if GetTime() < lustExpiration then
@@ -497,7 +522,7 @@ local function UpdateBloodlustState()
 
     -- Hold a lust already known to be running across a tick that couldn't read
     -- it (cast-inferred lust has no aura to re-read, so it relies on this).
-    if not state.lustActive
+    if mayInfer and not state.lustActive
        and oldLustActive and oldLustExpiration > 0 and GetTime() < oldLustExpiration then
         state.lustActive = true
         state.lustExpiration = oldLustExpiration
@@ -550,11 +575,14 @@ end
 -- reporting sends someone to check; over-reporting loses the pull.
 local function UpdateBresState()
     local oldCharges = state.bresCharges
+    local oldSource = state.bresSource
     local chargesKnown = true
+    local source = "none"
 
     local chargeInfo = C_Spell.GetSpellCharges(BRES_SPELL_ID)
     if chargeInfo then
         -- Encounter charge system active
+        source = "encounter"
         local charges = SafeNumber(chargeInfo.currentCharges)
         local cooldownStart = SafeNumber(chargeInfo.cooldownStartTime)
         local cooldownDuration = SafeNumber(chargeInfo.cooldownDuration)
@@ -579,6 +607,7 @@ local function UpdateBresState()
         for _, id in ipairs(BRES_CLASS_SPELLS) do
             if IsPlayerSpell(id) then
                 active = true
+                source = "personal"
                 maxCharges = 1
                 local cooldownInfo = C_Spell.GetSpellCooldown(id)
                 local duration = cooldownInfo and SafeNumber(cooldownInfo.duration)
@@ -603,11 +632,16 @@ local function UpdateBresState()
         state.bresCooldownDuration = cooldownDuration
     end
 
-    -- Only alert on a drop between two readable samples.  A drop to or from the
-    -- unreadable placeholder isn't a resurrection, and announcing one would be
-    -- worse than staying quiet.  The cost is that a brez spent entirely inside a
-    -- blind window goes unannounced.
-    if chargesKnown and oldCharges > 0 and state.bresCharges < oldCharges
+    state.bresSource = source
+
+    -- Only alert on a drop between two comparable samples: both readable, and
+    -- both from the same source.  A drop to or from the unreadable placeholder
+    -- isn't a resurrection, and neither is the shared encounter pool giving way
+    -- to a personal cooldown at ENCOUNTER_END -- that's a change of what is
+    -- being counted, not a change in the count.  The cost is that a brez spent
+    -- entirely inside a blind window, or across that boundary, goes unannounced.
+    if chargesKnown and source == oldSource
+       and oldCharges > 0 and state.bresCharges < oldCharges
        and PulseCheckDB.sound.bresUsed then
         PlayAlertSound(PulseCheckDB.sound.bresUsedSound, "bresUsedSound")
     end
