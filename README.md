@@ -51,8 +51,8 @@ Built-in alert sounds for bloodlust activation, bloodlust ready (sated expired),
 
 ## Compatibility
 
-- **Retail only** — requires World of Warcraft 12.0 (Midnight) or later
-- Handles 12.0 "secret values" aura restrictions with haste-delta and time-based fallbacks
+- **Retail only** — requires World of Warcraft 12.1 (Midnight) or later
+- Handles "secret values" aura restrictions: bloodlust is detected from the Sated debuff, which stays readable during encounters when the buff itself doesn't
 - No external library dependencies
 
 ## License
