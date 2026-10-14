@@ -1,0 +1,15 @@
+package-as: PulseCheck
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+ignore:
+  - docs
+  - reviews
+  - .github
+  - export.sh
+  - README.md
+  - AGENTS.md
+  - CLAUDE.md
+  - bloodlust-detection-research.md
