@@ -162,8 +162,10 @@ The main frame uses a CENTER anchor relative to UIParent's BOTTOMLEFT. `SetPoint
 | `PulseCheck.lua` | All addon logic |
 | `Locales/enUS.lua` | English locale strings (`PC_L` table) |
 | `bloodlust-detection-research.md` | API research notes and spell ID reference |
-| `CHANGELOG.md` | Version history |
-| `export.sh` | Package addon as a distributable zip |
+| `CHANGELOG.md` | Version history; the packager uses it as the CurseForge release notes |
+| `.pkgmeta` | Packager config: addon folder name, changelog source, files to leave out of the zip |
+| `.github/workflows/release.yml` | Pushing a `v*` tag runs the BigWigs packager, which uploads to CurseForge and creates the GitHub release. The tag must match `## Version:` in the TOC |
+| `export.sh` | Package addon as a distributable zip by hand (local testing; releases go through the workflow) |
 | `AGENTS.md` | Project instructions for AI coding assistants |
 
 ## References
