@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.1
+
+- Bump Interface to 120105 for patch 12.1.5 — verified compatible, no code changes
+
 ## 1.8.0
 
 - Fix `GetAuraDataByIndex(): Auras cannot be accessed when secret while tainted by 'PulseCheck'` in 12.1 — the patch made aura lookups by index, slot, or aura instance ID raise a Lua error when an addon calls them while auras are secret, so the 3-second raid-sated scan threw on every tick in raid/M+ combat. The scan now looks each sated ID up with `C_UnitAuras.GetUnitAuraBySpellID`, which carries no such restriction, so it keeps working *through* encounters rather than merely avoiding the crash
